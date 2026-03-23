@@ -1,0 +1,19 @@
+id: troubleshoot-agent-001
+name: "Troubleshoot Agent"
+description: >
+  Verifies the skill routes to the troubleshoot sub-skill when
+  the user reports agent container failures.
+tags:
+  - troubleshoot
+  - happy-path
+
+inputs:
+  prompt: "My Foundry agent container keeps crashing, help me debug it"
+
+expected:
+  output_contains:
+    - "troubleshoot"
+  output_not_contains:
+    - "error"
+  behavior:
+    max_tool_calls: 15

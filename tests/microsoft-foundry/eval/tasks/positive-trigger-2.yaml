@@ -1,0 +1,21 @@
+id: create-agent-from-scratch-001
+name: "Create Agent From Scratch"
+description: >
+  Verifies the skill routes through the create → deploy → invoke
+  lifecycle when asked to build a new agent from scratch.
+tags:
+  - create
+  - lifecycle
+  - happy-path
+
+inputs:
+  prompt: "Create a new hosted agent application from scratch using Python"
+
+expected:
+  output_contains:
+    - "create"
+  output_not_contains:
+    - "error"
+  behavior:
+    max_tool_calls: 15
+

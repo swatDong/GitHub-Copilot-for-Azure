@@ -1,0 +1,21 @@
+id: negative-app-service-001
+name: "Negative — Should Not Activate for App Service"
+description: >
+  Verifies the microsoft-foundry skill does NOT activate for an
+  unrelated prompt about Azure App Service deployment.
+tags:
+  - negative
+  - routing
+
+inputs:
+  prompt: "Deploy my Node.js web app to Azure App Service"
+
+expected:
+  output_not_contains:
+    - "Foundry"
+    - "ACR"
+    - "hosted agent"
+    - "container"
+    - "Docker"
+  behavior:
+    max_tool_calls: 10

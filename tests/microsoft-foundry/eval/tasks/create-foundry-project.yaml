@@ -1,0 +1,21 @@
+id: create-foundry-project-001
+name: "Create Foundry Project"
+description: >
+  Verifies the skill routes to the project/create sub-skill
+  for onboarding to Azure AI Foundry.
+tags:
+  - project
+  - onboarding
+  - happy-path
+
+inputs:
+  prompt: "Set up a new Azure AI Foundry project for hosting agents"
+
+expected:
+  output_contains:
+    - "project"
+    - "create"
+  output_not_contains:
+    - "error"
+  behavior:
+    max_tool_calls: 15

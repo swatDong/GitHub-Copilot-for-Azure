@@ -1,0 +1,22 @@
+id: deploy-hosted-agent-001
+name: "Deploy Hosted Agent"
+description: >
+  Verifies the skill routes to the deploy sub-skill when asked to
+  deploy a containerized agent to Azure AI Foundry.
+tags:
+  - deploy
+  - happy-path
+
+inputs:
+  prompt: "Deploy my Python agent to Azure AI Foundry"
+
+expected:
+  output_contains:
+    - "docker"
+    - "deploy"
+  output_not_contains:
+    - "Azure Functions"
+    - "App Service"
+  behavior:
+    max_tool_calls: 15
+

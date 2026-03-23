@@ -1,0 +1,21 @@
+id: deploy-model-preset-001
+name: "Deploy Model Preset"
+description: >
+  Verifies the skill routes to the models/deploy-model sub-skill
+  for model deployment requests.
+tags:
+  - models
+  - deploy
+  - happy-path
+
+inputs:
+  prompt: "Deploy GPT-4o to my Foundry project"
+
+expected:
+  output_contains:
+    - "deploy"
+    - "model"
+  output_not_contains:
+    - "Azure Functions"
+  behavior:
+    max_tool_calls: 15

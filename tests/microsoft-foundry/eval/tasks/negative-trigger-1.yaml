@@ -1,0 +1,22 @@
+id: negative-azure-functions-001
+name: "Negative — Should Not Activate for Azure Functions"
+description: >
+  Verifies the microsoft-foundry skill does NOT activate for an
+  unrelated prompt about Azure Functions.
+tags:
+  - negative
+  - routing
+
+inputs:
+  prompt: "Create an Azure Function with timer trigger"
+
+expected:
+  output_not_contains:
+    - "Foundry"
+    - "ACR"
+    - "hosted agent"
+    - "container"
+    - "Docker"
+  behavior:
+    max_tool_calls: 10
+

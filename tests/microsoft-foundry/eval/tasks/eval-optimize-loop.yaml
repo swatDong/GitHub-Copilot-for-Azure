@@ -1,0 +1,20 @@
+id: eval-optimize-loop-001
+name: "Eval and Optimize Loop"
+description: >
+  Verifies the skill routes to the observe sub-skill for
+  evaluation-driven prompt optimization.
+tags:
+  - observe
+  - eval
+  - happy-path
+
+inputs:
+  prompt: "Evaluate my agent and optimize the prompt based on results"
+
+expected:
+  output_contains:
+    - "eval"
+  output_not_contains:
+    - "error"
+  behavior:
+    max_tool_calls: 20

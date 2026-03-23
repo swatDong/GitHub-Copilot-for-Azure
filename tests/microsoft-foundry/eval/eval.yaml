@@ -1,0 +1,39 @@
+name: microsoft-foundry-eval
+description: >
+  Evaluation suite for the microsoft-foundry skill.
+  Validates routing logic across sub-skills (deploy, create, invoke,
+  troubleshoot, observe, models, project, rbac) and negative-match
+  behavior (skill should not activate for Azure Functions or App Service).
+skill: microsoft-foundry
+version: "1.0"
+
+config:
+  trials_per_task: 1
+  timeout_seconds: 1800
+  parallel: false
+  executor: copilot-sdk
+  model: claude-sonnet-4-20250514
+
+metrics:
+  - name: task_completion
+    weight: 0.4
+    threshold: 0.8
+    description: Did the skill produce the expected output for the task?
+  - name: trigger_accuracy
+    weight: 0.3
+    threshold: 0.9
+    description: Does the skill trigger on appropriate prompts and not on unrelated ones?
+  - name: behavior_quality
+    weight: 0.3
+    threshold: 0.7
+    description: Tool call limits, no fatal errors, clean execution
+
+graders:
+  - type: regex
+    name: no_fatal_errors
+    config:
+      must_not_match:
+        - "(?i)fatal error|unhandled exception|stack trace"
+
+tasks:
+  - "tasks/*.yaml"

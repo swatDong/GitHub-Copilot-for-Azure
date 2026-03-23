@@ -1,0 +1,20 @@
+id: rbac-permissions-001
+name: "RBAC Permissions"
+description: >
+  Verifies the skill routes to the rbac sub-skill for
+  role assignment and access control tasks.
+tags:
+  - rbac
+  - permissions
+  - happy-path
+
+inputs:
+  prompt: "Grant my service principal access to my Foundry project with RBAC"
+
+expected:
+  output_contains:
+    - "role"
+  output_not_contains:
+    - "error"
+  behavior:
+    max_tool_calls: 15
