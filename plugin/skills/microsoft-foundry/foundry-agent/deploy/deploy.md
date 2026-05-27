@@ -1,80 +1,74 @@
 # Foundry Agent Deploy
 
-Create and manage agent deployments in Azure AI Foundry. For hosted agents, this includes the full workflow from containerizing the project to verifying the deployed agent.
+Create and manage agent deployments in Azure AI Foundry. For hosted agents this skill drives the full pipeline (env-var scan → build → push → register → RBAC → smoke test → eval-suite generation) through the `foundry` CLI.
 
 ## Quick Reference
 
 | Property | Value |
 |----------|-------|
 | Agent types | Prompt (LLM-based), Hosted |
-| MCP server | `azure` |
-| Key Foundry MCP tools | `agent_definition_schema_get`, `agent_update`, `agent_get` |
-| CLI tools | `docker`, `az acr` (hosted agents only) |
+| Primary commands | `foundry agent deploy`, `foundry agent invoke` (Step 7 smoke test) |
+| Container methods | `zip`, `container`, `image` (auto-detected) |
 | Container protocols | `a2a`, `responses`, `invocations`, `invocations_ws`, `mcp` |
 | Supported languages | .NET, Node.js, Python, Go, Java |
+| Azure MCP tools (eval Step 8 only) | `agent_definition_schema_get`, `agent_update`, `agent_get`, `agent_delete` (see [Below the CLI](#below-the-cli-azure-mcp-fallback)) |
 
 ## When to Use This Skill
 
-USE FOR: deploy agent to foundry, push agent to foundry, ship my agent, build and deploy container agent, deploy hosted agent, direct code deployment, upload code deployment, create hosted agent, deploy prompt agent, ACR build, container image for agent, docker build for foundry, redeploy agent, update agent deployment, clone agent, delete agent, azd deploy hosted agent, azd ai agent, azd up for agent, deploy agent with azd.
+USE FOR: deploy agent to foundry, push agent to foundry, ship my agent, build and deploy container agent, deploy hosted agent, direct code deployment, upload code deployment, create hosted agent, deploy prompt agent, ACR build, container image for agent, docker build for foundry, redeploy agent, update agent deployment, clone agent, delete agent, deploy agent.
 
-> ⚠️ **DO NOT manually run** `azd up`, `azd deploy`, `az acr build`, `docker build`, `agent_update`, or direct-code REST upload commands **without reading this skill first.** This skill orchestrates the full deployment pipeline: project scan → env var collection → deployment method selection → Dockerfile/image build or direct-code metadata upload → agent creation/version update → verification. Running CLI commands or calling MCP tools individually skips critical steps (env var confirmation, schema or REST metadata validation, RBAC setup, invocation verification).
-
-## MCP Tools
-
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `agent_definition_schema_get` | Get JSON schema for agent definitions | `projectEndpoint` (required), `schemaType` (`prompt`, `hosted`, `tools`, `all`) |
-| `agent_update` | Create, update, or clone an agent | `projectEndpoint`, `agentName` (required); `agentDefinition` (JSON), `isCloneRequest`, `cloneTargetAgentName`, `modelName` |
-| `agent_get` | List all agents or get a specific agent | `projectEndpoint` (required), `agentName` (optional) |
-| `agent_delete` | Delete an agent and clean up hosted-agent runtime resources | `projectEndpoint`, `agentName` (required) |
+> ⚠️ **DO NOT run `foundry agent deploy` directly** without reading this skill first. The bare CLI command skips the env-var scan, post-deploy smoke test, and mandatory eval-suite generation that this skill enforces. Run the CLI from within this skill's workflow.
 
 ## Deployment Method Selection
 
 Direct code deployment is opt-in only.
 
 - Prompt agents use [Workflow: Prompt Agent Deployment](#workflow-prompt-agent-deployment).
-- Hosted agents use [Workflow: Hosted Agent Deployment](#workflow-hosted-agent-deployment); select the hosted deployment method in Step 3.
-- Do not infer direct code deployment just because Docker is unavailable or a Dockerfile is missing. Ask or use the default Docker/ACR workflow guidance.
+- Hosted agents use [Workflow: Hosted Agent Deployment](#workflow-hosted-agent-deployment); `foundry agent deploy` auto-detects the method in Step 3.
+- Do not infer direct code deployment just because Docker is unavailable or a Dockerfile is missing. Ask, or use the default Docker/ACR detection guidance.
 
-If the user explicitly says `using direct code deployment`, `direct-code deployment`, `upload code deployment`, or otherwise clearly asks to deploy by uploading source code, Step 3 reads [Direct Code Deployment Reference](references/direct-code-deployment.md), deploys the agent directly, then proceeds directly to [Step 7: Test the Agent](#step-7-test-the-agent).
+If the user explicitly says `using direct code deployment`, `direct-code deployment`, `upload code deployment`, or otherwise clearly asks to deploy by uploading source code, Step 3 reads [Direct Code Deployment Reference](references/direct-code-deployment.md), passes `--method zip` to `foundry agent deploy`, then proceeds directly to [Step 7: Test the Agent](#step-7-test-the-agent).
 
 ## Workflow: Hosted Agent Deployment
 
 > ⚠️ **Warning: hosted agent deployment has 8 steps, not 7.**
 >
-> The single most common failure of this skill is stopping after Step 7 (invocation smoke test) and emitting a "deployment complete" summary. **Step 8 (auto-generate evaluation suite) is mandatory and runs automatically after every deploy — including redeploys, version bumps, and `azd deploy` re-runs.**
+> The single most common failure of this skill is stopping after Step 7 (invocation smoke test) and emitting a "deployment complete" summary. **Step 8 (auto-generate evaluation suite) is mandatory and runs automatically after every deploy — including redeploys, version bumps, and any rerun against an already-existing agent.**
 >
 > Before you write any final summary, Playground link, version table, or deployment success message, you MUST self-verify:
 >
 > 1. Did Step 8 run to completion (suite generated **or** documented fallback persisted)?
-> 2. Is deployment context resolvable from azd or metadata, and was `.foundry` updated only with non-derivable overlay/cache state?
-> 3. Did you prompt the user to run an evaluation?
+> 2. Did you prompt the user to run an evaluation?
 >
 > If the answer to any of these is **no**, do not summarize — go run Step 8 now.
 
-> ⚠️ **`azd deploy` ≠ deployment complete.** `azd deploy` (or any `azd up`/`az acr build`/`agent_update` shortcut) only covers Steps 1–6. You **MUST** still execute Step 7 (invocation test) and Step 8 (auto-generate evaluation suite) before reporting success to the user. A successful `azd deploy` exit code is **not** a stopping condition. A successful invocation in Step 7 is **not** a stopping condition either.
+> ⚠️ **`foundry agent deploy` returning successfully ≠ deployment complete.** The CLI returns after the agent version is registered with Foundry; it does **not** wait for the hosted-agent version to reach `active`. You **MUST** still execute Step 7 (invocation smoke test) and Step 8 (auto-generate evaluation suite) before reporting success to the user.
 
 ### Definition of Done — Hosted Agent Deployment
 
-A hosted-agent deployment is complete only when **every** box below is checked. Do **not** produce a final "deployment successful" summary, table, or Playground link until all items are done. If you skip any item, your response is incomplete.
+A hosted-agent deployment is complete only when **every** box below is checked. Do **not** produce a final "deployment successful" summary, table, or Playground link until all items are done.
 
-For direct-code deployments, Step 3 runs the direct-code reference and deploys the agent directly, then proceeds directly to Step 7.
+For direct-code deployments, Step 3 runs the direct-code reference and deploys the agent with `foundry agent deploy --method zip`, then proceeds directly to Step 7.
 
 - [ ] Step 1 — Project scanned, type detected
 - [ ] Step 2 — Environment variables confirmed with user
-- [ ] Step 3 — Deployment method selected and prepared
-- [ ] Step 4 — Agent configuration collected
-- [ ] Step 5 — Agent definition schema retrieved
-- [ ] Step 6 — `agent_update` called successfully
-- [ ] Step 7 — RBAC checked **and** invocation smoke test passed (via the invoke skill)
+- [ ] Step 3 — `foundry agent deploy` completed successfully (build + push + register + RBAC handled by the CLI)
+- [ ] Step 4 — Any agent configuration the CLI couldn't infer was collected and passed to deploy
+- [ ] Step 5 — Schema validation succeeded (handled by the CLI during Step 3)
+- [ ] Step 6 — RBAC assigned by the CLI (or the user was told to ask an admin)
+- [ ] Step 7 — Invocation smoke test passed (via the invoke skill)
 - [ ] Step 8 — Auto-generated evaluation suite job reached `succeeded` (or documented fallback)
 - [ ] Step 8 — Cache files written: `.foundry/suites/<suite>-v<ver>.json`, `.foundry/evaluators/<eval>-v<ver>.json` (FULL definition, not stub), `.foundry/datasets/<agent>-<dataset>-v<ver>.ref.json`, AND `.foundry/datasets/<dataset>-v<ver>/<blob>` (actual dataset rows via SAS-url download)
-- [ ] Deployment context is resolvable from azd or metadata; `.foundry/agent-metadata*.yaml` contains only non-derivable overlay/cache state for the selected environment
 - [ ] User prompted to run an evaluation
+
+### Prerequisites
+
+- A default Foundry project endpoint set with `foundry agent project set <url>` (inspect with `foundry agent project show`), **or** the user will pass `--project-endpoint <url>` on the deploy invocation.
+- An Azure CLI login (`az login`) or other `DefaultAzureCredential`-compatible auth in the shell where `foundry agent deploy` runs.
 
 ### Step 1: Detect and Scan Project
 
-Get the project path from the selected agent root in the project context (see [Common Project Context Resolution](../../SKILL.md#agent-common-project-context-resolution)). Detect the project type by checking for these files. Do **not** scan sibling agent folders.
+Get the project path from the user's current context (the agent source folder, typically the folder containing `agent.yaml`). Detect the project type by checking for these files:
 
 | Project Type | Detection Files |
 |--------------|-----------------|
@@ -85,7 +79,7 @@ Get the project path from the selected agent root in the project context (see [C
 | Java (Maven) | `pom.xml` |
 | Java (Gradle) | `build.gradle` |
 
-Delegate an environment variable scan to a sub-agent. Provide the selected agent root path and project type. Search source files inside that folder only for these patterns:
+Delegate an environment variable scan to a sub-agent. Provide the project root and project type. Search source files inside that folder only for these patterns:
 
 | Project Type | Patterns to Search |
 |--------------|--------------------|
@@ -99,115 +93,85 @@ Classification: if followed by a throw/error → required; if followed by a fall
 
 ### Step 2: Collect and Confirm Environment Variables
 
-> ⚠️ **Warning:** Environment variables are included in the agent payload and are difficult to change after deployment.
+> ⚠️ **Warning:** Environment variables are baked into the agent version and are difficult to change after deployment.
 
-Use azd environment values from the project context to pre-fill discovered variables. Merge with any user-provided values. Present all variables to the user for confirmation with variable name, value, and source (`azd`, `project default`, or `user`). Mask sensitive values.
+Merge discovered variables with any values the user has already provided. Present them to the user for confirmation with variable name, value, and source (`agent.yaml`, `project default`, `existing .env`, or `user`). Mask sensitive values.
 
 Loop until the user confirms or cancels:
 - `yes` → Proceed
 - `VAR_NAME=new_value` → Update the value, show updated table, ask again
 - `cancel` → Abort deployment
 
-### Step 3: Select Deployment Method and Prepare
+Persist the confirmed values into the project's `.env` (which `foundry agent deploy` auto-loads) **or** be prepared to pass them on the command line:
+- `--env KEY=VALUE` (repeatable, highest precedence)
+- `--env-file <path>` (suppresses auto-load of `.env`)
 
-If the user explicitly requested direct code deployment or upload code deployment, do not generate a Dockerfile or build an image. Read and follow [Direct Code Deployment Reference](references/direct-code-deployment.md), deploy the agent directly, then proceed directly to [Step 7: Test the Agent](#step-7-test-the-agent).
+### Step 3: Run `foundry agent deploy`
 
-For all other hosted-agent deployments, continue with the Docker/ACR preparation below.
+If the user explicitly requested direct code deployment / upload code deployment, do not generate a Dockerfile. Read and follow [Direct Code Deployment Reference](references/direct-code-deployment.md), then run:
 
-#### Image built and pushed to ACR
-
-Delegate Dockerfile creation to a sub-agent. Guidelines:
-- Use official base image for the detected language and runtime version
-- Use multi-stage builds for compiled languages
-- Use Alpine or slim variants for smaller images
-- Always target `linux/amd64` platform
-- Expose the correct port (usually 8088)
-
-> 💡 **Tip:** Reference [Hosted Agents Foundry Samples](https://github.com/microsoft-foundry/foundry-samples/tree/main/samples/python/hosted-agents) for containerized agent examples.
-
-Also generate `docker-compose.yml` and `.env` files for local development.
-
-**IMPORTANT**: You MUST always generate image tag as current timestamp (e.g., `myagent:202401011230`) to ensure uniqueness and avoid conflicts with existing images in ACR. DO NOT use static tags like `latest` or `v1`.
-
-Collect ACR details from project context.
-
-- If an ACR already exists, use it, then verify that the Foundry project managed identity has pull permissions (for example, `Container Registry Repository Reader` or equivalent) on the target repository/registry. If the role assignment is missing, add it.
-- If no ACR exists, create a new one with ABAC repository permissions mode, and assign `Container Registry Repository Reader` to the Foundry project managed identity. Foundry hosted agents use ABAC mode that requires repository-scoped roles, not the registry-level `AcrPull` role.
-
-Let the user choose the build method:
-
-**Cloud Build (ACR Tasks) (Recommended)** — no local Docker required:
 ```bash
-az acr build --registry <acr-name> --image <repository>:<tag> --platform linux/amd64 --source-acr-auth-id "[caller]" --file Dockerfile .
+foundry agent deploy --method zip
 ```
 
-> ⚠️ **Mandatory:** The `--source-acr-auth-id "[caller]"` parameter is required. Do NOT omit it — without this flag the build will fail due to missing authentication context.
+For all other hosted-agent deployments, run `foundry agent deploy` from the agent source folder. Method auto-detection: `--image` (or `agent.yaml#image`) → `image`; a `Dockerfile` next to `agent.yaml` → `container`; otherwise → `zip`.
 
-**Local Docker Build:**
 ```bash
-docker build --platform linux/amd64 -t <image>:<tag> -f Dockerfile .
-az acr login --name <acr-name>
-docker tag <image>:<tag> <acr-name>.azurecr.io/<repository>:<tag>
-docker push <acr-name>.azurecr.io/<repository>:<tag>
+# Default — auto-detect method, use persisted default project endpoint, auto-provision ACR in the project RG if needed
+foundry agent deploy
+
+# Override project endpoint for a single deploy
+foundry agent deploy --project-endpoint https://acct.services.ai.azure.com/api/projects/proj
+
+# Inject runtime env vars (highest precedence)
+foundry agent deploy --env LOG_LEVEL=debug --env-file ./prod.env
+
+# Bring-your-own-image — skip build/push entirely
+foundry agent deploy --method image --image myacr.azurecr.io/agents/sample:1.2.3
+
+# Dry run — resolve & validate config, print plan, exit
+foundry agent deploy --dry-run
 ```
 
-> 💡 **Tip:** Prefer Cloud Build if Docker is not available locally. On Windows with WSL, prefix Docker commands with `wsl -e` if `docker info` fails but `wsl -e docker info` succeeds.
+The CLI handles, in this order:
+- Resolving env vars from `--env` / `--env-file` / `.env` / `agent.yaml` (with fail-fast on unresolved `${REF}` placeholders unless `--allow-unresolved-env` is passed).
+- Building the image remotely (for `container` method) and pushing to ACR (auto-provisioned in the project's resource group if none is specified via `--registry`). Image tags are unique by default; do not pass static tags like `latest`.
+- Zipping the source and uploading (for `zip` method).
+- Registering the agent definition with Foundry (creates a new agent if it does not exist; pushes a new version on conflict, unless `--no-update-if-exists`).
+- Assigning the ACR pull and Foundry roles required for the hosted agent identity to run. `--skip-rbac` opts out.
 
-### Step 4: Collect Agent Configuration
+The CLI remembers resolved choices for future runs; the skill does not need to manage that cache, and should not instruct the user to edit it by hand.
 
-Use the project endpoint and ACR name from the project context. Ask the user only for values not already resolved:
-- **Agent name** — Unique name for the agent
-- **Model deployment** — Model deployment name (e.g., `gpt-4o`)
+If `foundry agent deploy` exits non-zero, read the error and either ask the user (for credential / permission / config issues) or fix the project (for build / Dockerfile issues) before retrying. Do **not** treat the deploy as successful.
 
-### Step 5: Get Agent Definition Schema
+### Step 4: Collect Agent Configuration (Only When Needed)
 
-Use `agent_definition_schema_get` with `schemaType: hosted` to retrieve the current schema and validate required fields.
+`foundry agent deploy` reads `agent.yaml` for the agent name, declared protocols, CPU/memory pairing, model deployment, and environment variable keys. Ask the user only for values that are missing from `agent.yaml` (and cannot be inferred from the project) before Step 3:
 
-### Step 6: Create the Agent
+- **Agent name** — pass `--name <name>` to override `agent.yaml#name` (regex `^[A-Za-z0-9][-A-Za-z0-9]*$`). Required if `agent.yaml` has no `name`.
+- **Model deployment** — typically referenced from `agent.yaml` or `.env` (e.g., `AZURE_AI_MODEL_DEPLOYMENT_NAME`). Confirm with the user during Step 2 if missing.
 
-Use `agent_update` with the agent definition:
+### Step 5: Definition Schema (Optional)
 
-> ⚠️ **Protocol version source of truth:** Do NOT copy the protocol version from `agent_definition_schema_get` examples. Use the protocol version declared by the agent source itself (for example, `agent.yaml` or `agent.manifest.yaml`).
+The CLI validates the agent definition against the live Foundry schema before registering it; you do not need to fetch the schema separately. If a deploy fails schema validation, use `agent_definition_schema_get` (see [Below the CLI](#below-the-cli-azure-mcp-fallback)) to inspect the current schema for debugging.
 
-```json
-{
-  "command": "agent_update",
-  "intent": "Update a hosted agent with a new docker image",
-  "parameters": {
-    "projectEndpoint": "<project-endpoint>",
-    "agentName": "<agent-name>",
-    "agentDefinition": {
-      "kind": "hosted",
-      "image": "<acr-name>.azurecr.io/<repository>:<tag>",
-      "cpu": "<cpu-cores>",
-      "memory": "<memory>",
-      "container_protocol_versions": [
-        { "protocol": "<protocol>", "version": "<version>" }
-      ],
-      "environment_variables": { "<var>": "<value>" }
-    }
-  }
-}
-```
+### Step 6: Agent Created — Identities Captured
 
-Capture the per-agent identity from the agent creation response, then retrieve the project-level agent identity from the project resource after creation. You will need both identities to assign the minimum RBAC required for invocation before running invoke tests.
+`foundry agent deploy` automatically assigns the ACR pull role and the Foundry roles required for the per-agent and project-level managed identities to run, unless `--skip-rbac` was passed. The skill does not need to issue `az role assignment` commands directly.
+
+If the deploy succeeded but later steps (smoke test) report a permission error, the most likely cause is that the user does not have permission to create the required role assignments. In that case, stop the deployment workflow and explain that hosted-agent invocation requires `Azure AI User` on the per-agent identity and project-level agent identity at the Cognitive Services account scope, and the deployment cannot be treated as complete until someone with RBAC assignment permission grants the missing role.
 
 ### Step 7: Test the Agent
 
-For a newly deployed hosted agent, before invocation testing, first check whether the per-agent identity and project-level agent identity already have the minimum RBAC required for invocation.
+For a hosted agent, the version may still be provisioning even after `foundry agent deploy` returns; the smoke test is the first opportunity to detect provisioning failures.
 
-Required role assignment:
-- `Azure AI User`
+Read and follow the [invoke skill](../invoke/invoke.md) to send a short probe relevant to the agent's purpose (ask the user for a probe message if unclear). For a default-project, default-name deploy this is simply:
 
-Required scope: the Cognitive Services account, not the project.
+```bash
+foundry agent invoke "<probe message>"
+```
 
-Check existing assignments before creating any new assignment. If the required role assignment is missing for either identity, assign it before invocation testing.
-
-If the current user account does not have permission to create a missing role assignment, stop the deployment workflow here. Explain to the user that hosted-agent invocation requires `Azure AI User` on the per-agent identity and project-level agent identity at the Cognitive Services account scope, and the deployment cannot be treated as complete until someone with RBAC assignment permission grants the missing role.
-
-After this RBAC check is complete, read and follow the [invoke skill](../invoke/invoke.md) to send a test message and verify the agent responds correctly. DO NOT SKIP reading the invoke skill — it contains important information about required hosted-agent session handling.
-
-If invocation testing still fails after this RBAC check, immediately read and follow the [troubleshoot skill](../troubleshoot/troubleshoot.md). Do not treat the deployment as fully successful until invocation succeeds.
+If the call fails with a "version not active" / `424 FailedDependency` / `session_not_ready` error, wait 15-30 seconds and retry up to a few times. If it continues to fail (including auth or permission errors), immediately read and follow the [troubleshoot skill](../troubleshoot/troubleshoot.md). Do not treat the deployment as fully successful until invocation succeeds.
 
 > ⚠️ **Not done yet: invocation success is the midpoint, not the finish line.** The next action after a passing smoke test is **Step 8**, not a deployment summary. Do not write a summary, version table, or Playground link yet.
 
@@ -460,28 +424,40 @@ Use `agent_get` without `agentName` to list all agents, or with `agentName` to g
 
 | Error | Cause | Resolution |
 |-------|-------|------------|
-| Project type not detected | No known project files found | Ask user to specify project type manually |
-| Docker not running | Docker Desktop not started or not installed | Start Docker Desktop, or use Cloud Build (ACR Tasks) instead |
-| ACR login failed | Not authenticated to Azure | Run `az login` first, then `az acr login --name <acr-name>` |
-| Build/push failed | Dockerfile errors or insufficient ACR permissions | Check Dockerfile syntax, verify Contributor or AcrPush role on registry |
-| ACR build log crash | `UnicodeEncodeError` when `az acr build` streams remote logs | The remote build continues independently — do not assume failure. Get the `<run-id>` from the earlier `az acr build` output and check status with `az acr task show-run -r <acr-name> --run-id <run-id> --query status`. |
-| Agent creation failed | Invalid definition or missing required fields | Use `agent_definition_schema_get` to verify schema, check all required fields |
-| Hosted agent not running after creation | Provisioning failed or the image is not usable | Verify ACR image path, check cpu/memory values, confirm ACR permissions, then inspect hosted-agent logs with the troubleshoot skill |
-| Role assignment failed | The required invocation RBAC was not granted | Stop the deployment workflow and explain that hosted-agent invocation requires `Azure AI User` on the per-agent identity and project-level agent identity at the Cognitive Services account scope |
-| Invocation test failed after deployment | Missing or incorrect invocation RBAC for the per-agent identity or project-level agent identity | Check whether `Azure AI User` is assigned to the per-agent identity and project-level agent identity at the Cognitive Services account scope; assign missing role assignments, then retry invocation |
-| Permission denied | Insufficient Foundry project permissions | Verify Azure AI Owner or Contributor role on the project |
-| Schema fetch failed | Invalid project endpoint | Verify project endpoint URL format: `https://<resource>.services.ai.azure.com/api/projects/<project>` |
+| `--project-endpoint is required` | No default set and no flag passed | Run `foundry agent project set <url>` once, or pass `--project-endpoint <url>`. |
+| `agent name is required` | `agent.yaml` lacks `name` and no `--name` flag | Set `name:` in `agent.yaml` or pass `--name <name>`. |
+| `cpu X requires memory Y` | Invalid CPU/memory pair | Valid pairs: `0.5/1`, `1/2`, `2/4`. |
+| `agent '<name>' already exists` | Ran with `--no-update-if-exists` | Rerun without that flag to push a new version. |
+| `insufficient permissions to create hosted agents` | Caller lacks Foundry roles | Ask an admin for the *Azure AI Project User* role on the project. |
+| Auth failure (`AzureCliCredential` / `DefaultAzureCredential`) | Not signed in | `az login`, or set `AZURE_TENANT_ID` / `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET`, then retry. |
+| `Dockerfile not found at <path>` | Container method detected but no Dockerfile | Pass `--dockerfile <path>`, place a `Dockerfile` next to `agent.yaml`, or pick `--method zip`. |
+| `--image cannot be combined with: --dockerfile, ...` | `image` method is mutually exclusive with build/registry flags | Either pre-build and use `--method image --image <ref>`, or let the CLI build by removing `--image`. |
+| Unresolved `${REF}` placeholder | `agent.yaml` references an env var that was not provided | Pass it via `--env KEY=VALUE` / `--env-file`, set it in `.env`, or pass `--allow-unresolved-env` to ship the literal value. |
+| `--registry` not in project resource group | PoC limitation — cross-RG / cross-subscription ACR not supported yet | Omit `--registry` to auto-provision an ACR in the project's resource group. |
+| Hosted agent not active after deploy | Provisioning failed or the image is not usable | Verify ACR image path, check cpu/memory values, then inspect hosted-agent logs with the [troubleshoot skill](../troubleshoot/troubleshoot.md). |
+| Invocation smoke test failed | Missing invocation RBAC, schema mismatch, or runtime error | Check whether `Azure AI User` is assigned to the per-agent identity and project-level agent identity at the Cognitive Services account scope; otherwise inspect logs via the [troubleshoot skill](../troubleshoot/troubleshoot.md) and retry. |
+| Permission denied | Insufficient Foundry project permissions | Verify Azure AI Owner or Contributor role on the project. |
+
+## Below the CLI (Azure MCP Fallback)
+
+Use these when the `foundry` CLI is missing a capability:
+
+| Capability | Tool |
+|------------|------|
+| Inspect the live agent definition schema (debugging) | `agent_definition_schema_get` |
+| Manage existing agents (list / get / clone / delete) | `agent_get`, `agent_update` (with `isCloneRequest`), `agent_delete` |
+| Evaluation-suite generation, dataset/evaluator cache work | See Step 8 — still MCP-driven |
 
 ## Non-Interactive / YOLO Mode
 
-When running in non-interactive mode (e.g., `nonInteractive: true` or YOLO mode), the skill skips user confirmation prompts and uses sensible defaults:
+When running in non-interactive mode (e.g., `nonInteractive: true` or YOLO mode), the skill skips user confirmation prompts and relies on values that are already resolvable:
 
-- **Environment variables** — Uses values resolved from `azd env get-values` and project defaults without prompting for confirmation
-- **Agent name** — Must be provided in the initial user message or derived sensibly from the project context (`agent.yaml`, `agent.manifest.yaml`, folder name); if missing, the skill fails with an error instead of prompting
-- **Docker/ACR hosted-agent verification** — Automatically continues into RBAC and invocation verification without additional prompts once deployment succeeds
-- **Direct code deployment** — If explicitly requested, Step 3 reads the direct-code reference, deploys the agent directly, then proceeds directly to Step 7
+- **Environment variables** — uses values from `--env`, `--env-file`, `.env`, and `agent.yaml` without prompting; deploy fails fast on any unresolved `${REF}` placeholder unless `--allow-unresolved-env` is set.
+- **Agent name** — must be set in `agent.yaml` or passed via `--name`; otherwise `foundry agent deploy` fails with a clear error.
+- **Hosted-agent verification** — continues into RBAC handling (done by the CLI) and the Step 7 invocation smoke test without additional prompts once deploy succeeds.
+- **Direct code deployment** — if explicitly requested, Step 3 reads the direct-code reference and runs `foundry agent deploy --method zip`, then proceeds directly to Step 7.
 
-> ⚠️ **Warning:** In non-interactive mode, ensure all required values (project endpoint, agent name, model deployment name, and ACR image for Docker/ACR deployments) are provided upfront in the user message, local `.env`, manifests, or available via `azd env get-values`. Missing values will cause the deployment to fail rather than prompt.
+> ⚠️ **Warning:** In non-interactive mode, ensure all required values (project endpoint, agent name, model deployment, env vars, and ACR image for `--method image` deploys) are provided upfront via flags, `agent.yaml`, or `.env`. Missing values cause `foundry agent deploy` to fail rather than prompt.
 
 ## Additional Resources
 

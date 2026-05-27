@@ -1,5 +1,7 @@
 # Session Management
 
+> ℹ️ The `foundry` CLI manages sessions automatically for you (`foundry agent invoke` auto-creates and reuses sessions per-agent; pin with `--session-id`, reset with `--new-session`). This reference is for users working **below the CLI** with the raw Azure MCP tools or REST API.
+
 Manage hosted agent sessions — isolated compute environments that provide persistent state across invocations.
 
 This document covers session creation and lifecycle for both HTTP-protocol agents (`responses`, `invocations`) and WebSocket agents (`invocations_ws`).

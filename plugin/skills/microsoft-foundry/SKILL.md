@@ -13,7 +13,7 @@ This skill helps developers work with Microsoft Foundry resources, covering mode
 
 ## Pre-Execution Requirements
 
-> **MANDATORY: Before executing ANY workflow, you MUST first call the Azure MCP `foundry` tool and inspect the available Foundry MCP tools and related parameters.** Treat this initial `foundry` call as a discovery/help step. For this skill, Azure MCP `foundry` is the required entry point for Foundry-related MCP operations.
+> **Before executing a workflow that uses Azure MCP Foundry tools, first call the Azure MCP `foundry` tool and inspect the available tools and parameters.** Treat that initial `foundry` call as a discovery/help step. Workflows that are driven by the `foundry` CLI (see the sub-skill docs) do not need this preamble — invoke the CLI directly.
 
 ## Sub-Skills
 

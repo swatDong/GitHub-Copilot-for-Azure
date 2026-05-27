@@ -2,6 +2,8 @@
 
 > Source: [Microsoft — Passwordless connections for Azure services](https://learn.microsoft.com/azure/developer/intro/passwordless-overview) and [Azure Identity client libraries](https://learn.microsoft.com/dotnet/azure/sdk/authentication/).
 
+> ℹ️ The `foundry` CLI authenticates with `DefaultAzureCredential` by default. Override per call with `foundry agent deploy --auth <default|cli|env|managed-identity>`. `az login` is the simplest setup for local development.
+
 **Table of Contents:** [Golden Rule](#golden-rule) · [Authentication by Environment](#authentication-by-environment) · [Why Not DefaultAzureCredential in Production?](#why-not-defaultazurecredential-in-production) · [Production Patterns](#production-patterns) · [Local Development Setup](#local-development-setup) · [Environment-Aware Pattern](#environment-aware-pattern) · [Security Checklist](#security-checklist) · [Further Reading](#further-reading)
 
 ## Golden Rule

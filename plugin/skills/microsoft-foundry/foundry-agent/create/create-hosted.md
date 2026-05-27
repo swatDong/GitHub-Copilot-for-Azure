@@ -24,6 +24,8 @@ Create new hosted agent applications for Microsoft Foundry, or convert existing 
 
 > Relative reference paths in this file are resolved from the directory containing `create.md`. For example, `./references/agentframework.md` means the file next to this document under `create/references/`, not a path relative to the runtime working directory.
 
+> **Project endpoint (optional at create time)** — the `foundry` CLI accepts a project endpoint via `--project-endpoint <url>`; otherwise it uses the default set with `foundry agent project set <url>` (inspect via `foundry agent project show`). It is fine to scaffold without one and bind it later.
+
 ### Step 1: Determine Scenario
 
 Check the user's workspace for existing agent project indicators:
@@ -31,125 +33,78 @@ Check the user's workspace for existing agent project indicators:
 - **No agent-related code found** → **Greenfield**. Proceed to Greenfield Workflow (Step 2).
 - **Existing agent code present** → **Brownfield**. Proceed to Brownfield Workflow.
 
-### Step 2: Gather Requirements (Greenfield)
+### Step 2: Scaffold from a Sample (Greenfield)
 
-If the user hasn't already specified, use `ask_user` to collect in this order:
+Use the `foundry agent init` command. It owns sample browsing, download, and scaffolding for every supported (language, framework, protocol, sample) combination — do **not** call the GitHub Contents API or `gh`/`curl` to fetch samples by hand.
 
-**Language:** Python (default) or C#.
+**Pick the lane**
 
-**Protocol:**
+- If the user expressed clear preferences for language, framework, protocol, or sample, pass them as flags:
 
-| Protocol | Best For |
-|----------|----------|
-| `responses` (default) | Conversational agents using the OpenAI-compatible `/responses` contract |
-| `invocations` | Arbitrary payloads, custom SSE behavior, protocol bridges, webhook-style callers, or client-managed sessions |
-| `invocations_ws` | Real-time duplex workloads — voice agents, live streams, signaling for out-of-band media transports. The verify and adapter sections below assume HTTP — for WS specifics (URL with `agent_session_id`, browser-proxy requirement, framing), follow the dedicated [invocations-ws skill](../invocations-ws/invocations-ws.md). |
+  ```bash
+  foundry agent init <folder> \
+    --language <python|csharp> \
+    --framework <agent-framework|copilot-sdk|bring-your-own> \
+    --protocol <responses|invocations> \
+    --sample <slug>
+  ```
 
-> 💡 **Tip:** A single hosted agent can expose **multiple protocols simultaneously**. Declare each in `agent.yaml` under `protocols:` and register the matching handlers on the same `InvocationAgentServerHost` (e.g., `invocations` + `invocations_ws` to pair a control/batch HTTP path with a WebSocket path).
+- If the user has no preferences, default to **Python + `responses` + Microsoft Agent Framework** and pick the simplest sample that matches what the user asked the agent to do (e.g. `tools` for local function tools, `mcp` for MCP integration, `foundry-toolbox` for server-side tools, `hello-world`/`basic`/`simple` for a minimal start).
 
-**Framework:**
+- If the user wants to browse, run `foundry agent init --interactive` (single-select menus filtered by prior choices) **or** read the canonical template index from `foundry agent init --help` and surface the options to them. Do **not** invent or duplicate sample listings.
 
-The paths below refer to the framework-level directories in the Foundry sample repo. Choose the protocol-specific subpath in Step 3.
+- Optionally bind project + model deployment into the scaffold's `.env` at creation time: `--project-endpoint <url>` and `--model-deployment <name>`.
 
-| Framework | Python Path | C# Path |
-|-----------|-------------|---------|
-| Microsoft Agent Framework (default) | `agent-framework` | `agent-framework` |
-| LangGraph | `bring-your-own` | ❌ Python only |
-| Custom | `bring-your-own` | `bring-your-own` |
+> ⚠️ **Warning:** LangGraph is Python-only. For C# + LangGraph, suggest Microsoft Agent Framework or `bring-your-own` (Custom) instead.
 
-> ⚠️ **Warning:** LangGraph is Python-only. For C# + LangGraph, suggest Microsoft Agent Framework or Custom instead.
+> 💡 **Tip:** A single hosted agent can expose **multiple protocols simultaneously** (e.g. `invocations` + `invocations_ws` for a control HTTP path plus a WebSocket path). Declare each in `agent.yaml` under `protocols:` and register the matching handlers on the same `InvocationAgentServerHost`. For `invocations_ws` specifics, follow the dedicated [invocations-ws skill](../invocations-ws/invocations-ws.md).
 
-> 💡 **Tip:** In the sample repo, **Custom** corresponds to the **Bring Your Own** lanes.
+> ⚠️ **Tools:** Hosted agents access tools through a **Foundry Toolbox MCP endpoint** — they do NOT wire tools directly. If the user wants an agent with tools (web search, AI search, code interpreter, MCP servers, etc.), pick a `toolbox`/`mcp`/`foundry-toolbox` sample (see [references/use-toolbox-in-hosted-agent.md#code-integration-patterns](references/use-toolbox-in-hosted-agent.md#code-integration-patterns)). These samples include Foundry Toolbox integration in the sample code out of the box, but the user still needs an actual toolbox resource — resolve its endpoint in Step 4 (Verify Startup).
 
-> 💡 **Tip:** LangGraph samples are under **Bring Your Own**, not under a separate top-level `langgraph` directory.
+`foundry agent init` writes the project structure, `agent.yaml`, `.env`, dependency files, and (for container samples) a `Dockerfile`. Do not regenerate those by hand unless the user wants to deviate from the sample.
 
-If user has no specific preference, suggest Python + `responses` + Microsoft Agent Framework as defaults.
+### Step 3: Customize and Implement
 
-In non-interactive or YOLO mode, default to Python + `responses` + Microsoft Agent Framework unless the user's request clearly requires another supported combination.
+1. Read the scaffolded `README.md` and `agent.yaml` (or `agent.manifest.yaml`) to understand the sample's structure.
+2. Read the sample code to understand patterns, protocol handling, and dependencies used.
+3. If using Microsoft Agent Framework, follow the best practices in [references/agentframework.md](references/agentframework.md).
+4. Implement the user's specific requirements on top of the sample.
+5. Update configuration (`.env`, dependency files, `agent.yaml`, `agent.manifest.yaml`) as needed, and keep the selected protocol consistent across code and config.
+6. Ensure the project is in a runnable state.
 
-### Step 3: Browse and Select Sample
+### Step 4: Verify Startup
 
-List available samples using the GitHub API. First resolve the `sample_browse_path` (the browse root) from the selected language, protocol, and framework:
-
-| Selection | Sample Browse Path |
-|-----------|--------------------|
-| Python + Microsoft Agent Framework + `responses` | `samples/python/hosted-agents/agent-framework/responses/` |
-| Python + Microsoft Agent Framework + `invocations` | `samples/python/hosted-agents/agent-framework/invocations/` |
-| Python + LangGraph | `samples/python/hosted-agents/bring-your-own/{protocol}/langgraph-chat/` |
-| Python + Custom | `samples/python/hosted-agents/bring-your-own/{protocol}/` |
-| Python + Custom + `invocations_ws` | `samples/python/hosted-agents/bring-your-own/invocations_ws/` |
-| C# + Microsoft Agent Framework + `responses` | `samples/csharp/hosted-agents/agent-framework/` |
-| C# + Microsoft Agent Framework + `invocations` | `samples/csharp/hosted-agents/agent-framework/invocations-echo-agent/` |
-| C# + Custom | `samples/csharp/hosted-agents/bring-your-own/{protocol}/` |
-
-Use the chosen lane to browse the repo under `sample_browse_path`:
-
-```
-GET https://api.github.com/repos/microsoft-foundry/foundry-samples/contents/{sample_browse_path}
-```
-
-If the user has specified what they want the agent to do, choose the most relevant or most simple sample under that lane and record its exact `selected_sample_path`. Only if the user has not given any preferences, present the sample directories under `sample_browse_path` to the user and help them choose based on their requirements (e.g., RAG, tools, multi-agent workflows, HITL).
-
-If the requested combination does not have a real sample, say so clearly and suggest the nearest supported lane.
-
-> ⚠️ **Tools:** Hosted agents access tools through a **Foundry Toolbox MCP endpoint** — they do NOT wire tools directly. If the user wants an agent with tools (web search, AI search, code interpreter, MCP servers, etc.), select the `toolbox` samples (see [references/use-toolbox-in-hosted-agent.md#code-integration-patterns](references/use-toolbox-in-hosted-agent.md#code-integration-patterns)). These samples include Foundry Toolbox integration in the sample code out of the box, but the user still needs an actual toolbox resource — you'll resolve its endpoint in Step 6 (Verify Startup).
-
-### Step 4: Download Sample Files
-
-Download only the selected sample directory — do NOT clone the entire repo. Preserve the directory structure by creating subdirectories as needed.
-
-Use the exact `selected_sample_path` selected in Step 3.
-
-**Using `gh` CLI (preferred if available):**
-```bash
-gh api repos/microsoft-foundry/foundry-samples/contents/{selected_sample_path} \
-  --jq '.[] | select(.type=="file") | .download_url' | while read url; do
-  filepath="${url##*/{selected_sample_path}/}"
-  mkdir -p "$(dirname "$filepath")"
-  curl -sL "$url" -o "$filepath"
-done
-```
-
-**Using curl (fallback):**
-```bash
-curl -s "https://api.github.com/repos/microsoft-foundry/foundry-samples/contents/{selected_sample_path}" | \
-  jq -r '.[] | select(.type=="file") | .path + "\t" + .download_url' | while IFS=$'\t' read path url; do
-    relpath="${path#{selected_sample_path}/}"
-    mkdir -p "$(dirname "$relpath")"
-    curl -sL "$url" -o "$relpath"
-  done
-```
-
-For nested directories, recursively fetch the GitHub contents API for entries where `type == "dir"` and repeat the download for each.
-
-### Step 5: Customize and Implement
-
-1. Read the sample's `README.md` and `agent.yaml` or `agent.manifest.yaml` to understand its structure
-2. Read the sample code to understand patterns, protocol handling, and dependencies used
-3. If using Agent Framework, follow the best practices in [references/agentframework.md](references/agentframework.md)
-4. Implement the user's specific requirements on top of the sample
-5. Update configuration (`.env`, dependency files, `agent.yaml`, `agent.manifest.yaml`) as needed, and keep the selected protocol consistent across code and config
-6. Ensure the project is in a runnable state
-
-### Step 6: Verify Startup
-
-1. Install dependencies (use virtual environment for Python)
-2. Ask user to provide values for `.env` variables if placeholders were used using `ask_user` tool.
+1. Install dependencies using the language's standard tool (e.g. `pip install -r requirements.txt` inside a `.venv` for Python, `dotnet restore` for C#, `npm install` for Node). The scaffolded `README.md` documents the exact command if any setup is non-standard.
+2. Ask the user to fill in any placeholder `.env` values using `ask_user` / `askQuestions`.
    - **If the agent uses tools / toolboxes**: resolve the toolbox endpoint per [references/use-toolbox-in-hosted-agent.md#resolve-toolbox-endpoint](references/use-toolbox-in-hosted-agent.md#resolve-toolbox-endpoint).
-3. Run the main entrypoint
-4. Fix startup errors and retry if needed
-5. Send a protocol-appropriate test request to the correct endpoint:
-   - `responses` → `POST http://localhost:8088/responses`
-   - `invocations` → `POST http://localhost:8088/invocations`
-   - `invocations_ws` → open a WebSocket to `ws://localhost:8088/invocations_ws` (not HTTP POST). The wire format is developer-defined per the sample; see the [invocations-ws skill](../invocations-ws/invocations-ws.md) for the framing model and discovery guidance.
-6. Fix any errors from the test request and retry until it succeeds
-7. Once startup and test request succeed, stop the server to prevent resource usage
+3. Run the entrypoint exactly as documented in the scaffolded `README.md` (typically `python main.py` / `dotnet run` / `npm start`). The adapter should bind `http://localhost:8088`.
+4. Fix startup errors and retry if needed.
+5. In a **separate shell**, send a smoke-test request with `foundry agent invoke --local`:
+
+   ```bash
+   # responses or invocations protocol — auto-detected from agent.yaml
+   foundry agent invoke --local "<probe message>"
+
+   # explicit protocol
+   foundry agent invoke --local --protocol invocations -f request.json
+
+   # interactive web inspector (chat, request/response, tool calls)
+   foundry agent invoke --local --inspect
+   ```
+
+   For `invocations_ws` (WebSocket) samples, follow the [invocations-ws skill](../invocations-ws/invocations-ws.md); `foundry agent invoke` does not speak WebSocket.
+6. Fix any errors from the smoke test and retry until it succeeds.
+7. Once startup and smoke test succeed, stop the local server to free the port.
 
 **Guardrails:**
-- ✅ Perform real run to catch startup errors
-- ✅ Cleanup after verification (stop server)
-- ✅ Ignore auth/connection/timeout errors (expected without Azure config)
-- ❌ Don't wait for user input or create test scripts
+- ✅ Perform a real run to catch startup errors.
+- ✅ Cleanup after verification (stop the server).
+- ✅ Auth/connection/timeout errors against Azure services are **expected** here — the smoke test only validates that the local HTTP server starts and accepts requests.
+- ❌ Don't wait for user input or create disposable test scripts.
+
+### Step 5: Deploy Handoff
+
+Tell the user the local agent works and offer the next step: *"Say `deploy agent to foundry` to continue with the deploy sub-skill."*
 
 ## Brownfield Workflow: Convert Existing Agent to Hosted Agent
 
@@ -282,7 +237,7 @@ IMPORTANT: YOU MUST FOLLOW THESE.
 
 Apply these to both greenfield and brownfield projects:
 
-1. **Sample-first** — Start from a real sample in the current `foundry-samples` repo. Do not invent unsupported combinations, paths, or protocol behavior.
+1. **Sample-first** — Start from a real sample. For greenfield, `foundry agent init` enforces this (it only scaffolds from the canonical sample index). For brownfield, follow the named sample in the adapter lane. Do not invent unsupported combinations, paths, or protocol behavior.
 
 2. **Protocol consistency** — Keep the selected protocol consistent across sample choice, code, config, and verification steps.
 
@@ -338,9 +293,9 @@ If the user's request clearly requires another supported lane, use that lane ins
 
 | Error | Cause | Resolution |
 |-------|-------|------------|
-| GitHub API rate limit | Too many requests | Authenticate with `gh auth login` |
-| `gh` not available | CLI not installed | Use curl REST API fallback |
-| Sample not found | Path changed in repo or selected lane has no matching sample | List the selected parent directory again and choose a current sample |
-| Requested combination not supported | Example: C# + LangGraph | Explain the gap and switch to the nearest supported lane |
-| Protocol mismatch | Code, `agent.yaml`, and test request are not aligned | Make all three match the selected protocol |
-| Dependency install fails | Version conflicts | Use versions from the selected sample's own dependency file |
+| `foundry agent init` lane has no sample | Requested combination is unsupported (e.g. C# + LangGraph) or `--sample` slug doesn't exist in that lane | Re-run without filters or with `--interactive`; the CLI prints the candidate table for the surviving lane. Switch to the nearest supported lane. |
+| Sample download / GitHub rate limit during `init` | Anonymous GitHub API requests hit 60/hr cap | Set `GITHUB_TOKEN` (or `GH_TOKEN`) before re-running `foundry agent init`. |
+| `foundry agent init` refuses to scaffold | Destination folder exists and is non-empty | Re-run with `--force` (after confirming with the user). |
+| Protocol mismatch | Code, `agent.yaml`, and smoke-test request are not aligned | Make all three match the selected protocol. The CLI auto-detects protocol from `agent.yaml` when none is passed to `invoke`. |
+| Dependency install fails | Version conflicts | Use versions from the scaffolded sample's own dependency file. |
+| Local smoke test connects to nothing | Local entrypoint isn't running, or bound to a different port | Confirm the entrypoint is running and listening on `:8088`; otherwise pass `--port <int>` to `foundry agent invoke --local`. |

@@ -1,17 +1,16 @@
 # Foundry Agent Troubleshoot
 
-Troubleshoot and debug Foundry agents by collecting hosted-agent session logs, discovering observability connections, and querying Application Insights telemetry.
+Troubleshoot and debug Foundry agents by streaming hosted-agent session logs through the `foundry` CLI, and (advanced) by discovering observability connections and querying Application Insights telemetry.
 
 ## Quick Reference
 
 | Property | Value |
 |----------|-------|
 | Agent types | Prompt (LLM-based), Hosted |
-| MCP servers | `azure` |
-| Key Foundry MCP tools | `agent_get` |
-| Related skills | `trace` (telemetry analysis) |
-| Preferred query tool | `monitor_resource_log_query` (Azure MCP) — preferred over `azure-kusto` for App Insights |
-| CLI references | `az cognitiveservices account connection`, `az rest`, `curl` |
+| Primary command | `foundry agent monitor` (session logs, console + system channels) |
+| Related skills | [invoke](../invoke/invoke.md), [trace](../trace/trace.md) (telemetry analysis) |
+| Advanced (beyond CLI scope today) | App Insights KQL via Azure MCP `monitor_resource_log_query` |
+| CLI references | `az cognitiveservices account connection` (advanced step), `az login` (auth) |
 
 ## When to Use This Skill
 
@@ -19,65 +18,70 @@ Troubleshoot and debug Foundry agents by collecting hosted-agent session logs, d
 - Hosted agent version is not becoming active
 - Need to view hosted-agent session logs
 - Diagnose latency or timeout issues
-- Query Application Insights for agent traces and exceptions
+- (Advanced) Query Application Insights for agent traces and exceptions
 - Investigate agent runtime failures
 
-## MCP Tools
+## CLI Commands
 
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `agent_get` | Get agent details to determine type and inspect agent/version status | `projectEndpoint` (required), `agentName` (optional) |
+| Command | Purpose |
+|---------|---------|
+| `foundry agent monitor [<name>]` | Snapshot the last 50 console events for a deployed agent session. Uses the persisted default project endpoint and `agent.yaml#name` unless overridden. |
+| `foundry agent monitor --follow` | Stream until Ctrl+C. |
+| `foundry agent monitor --type system` | Switch from `console` (default) to the `system` log channel. |
+| `foundry agent monitor --tail <int>` | Last N events (1…300, default 50). |
+| `foundry agent monitor --session-id <id>` | Target a specific session (otherwise the CLI reuses the session cached by the last `foundry agent invoke`). |
+| `foundry agent monitor --raw` | Forward the raw SSE stream (pipe to `jq`/`grep`/`tee`). |
+| `foundry agent monitor --utc` | UTC timestamps instead of local. |
+| `foundry agent monitor --project-endpoint <url>` / `--agent-endpoint <url>` | Override the persisted defaults / target a specific deployed agent URL. |
 
 ## Workflow
 
 ### Step 1: Collect Agent Information
 
-Use the project endpoint and agent name from the project context (see [Common Project Context Resolution](../../SKILL.md#agent-common-project-context-resolution)). Ask the user only for values not already resolved:
-- **Project endpoint** — AI Foundry project endpoint URL
-- **Agent name** — Name of the agent to troubleshoot
+Identify the agent and project endpoint:
+- **Project endpoint** — pass `--project-endpoint <url>` to override; otherwise the CLI uses the default set via `foundry agent project set <url>` (inspect with `foundry agent project show`). If neither is available, ask the user.
+- **Agent name** — pass as positional argument; otherwise the CLI reads `agent.yaml` in the current directory.
 
-### Step 2: Determine Agent Type
+### Step 2: Determine Agent Type (Best-Effort)
 
-Use `agent_get` with `projectEndpoint` and `agentName` to retrieve the agent definition. Check the `kind` field:
-- `"hosted"` → Proceed to Step 3
-- `"prompt"` → Skip to Step 4 (Discover Observability Connections)
+There is no CLI verb that returns the agent kind today. Proceed straight to Step 3; `foundry agent monitor` will succeed for hosted agents and emit a clear error for prompt agents (which do not have session logs). If you get a "not a hosted agent" / "no sessions" style error, skip to Step 4 (Advanced).
 
-### Step 3: Retrieve Logs (Hosted Agents Only)
+### Step 3: Stream Hosted-Agent Session Logs
 
-Hosted-agent logs are scoped to individual **sessions** (sandbox instances).
+> ℹ️ **`invocations_ws` agents:** the session referenced here is the client-supplied `agent_session_id` that the WebSocket client put on the upgrade URL — not a value issued by a separate session-create call. If the user has the WS client logs, pull the `agent_session_id` from there and pass it as `--session-id`. See the [invocations-ws skill](../invocations-ws/invocations-ws.md) for the WS URL contract.
 
-> ℹ️ **`invocations_ws` agents:** the `sessionId` used by these REST endpoints is the **client-supplied `agent_session_id`** that the WebSocket client put on the upgrade URL — not a value issued by `session_create`. If the user has the WS client logs, pull the `agent_session_id` from there and pass it as `sessionId` below. See the [invocations-ws skill](../invocations-ws/invocations-ws.md) for the WS URL contract.
+Run `foundry agent monitor`. Default behavior: snapshot the last 50 console events for the cached session.
 
-1. **Check agent version status** — Use `agent_get` to verify the agent version status is `active`. If it is not active, the agent may still be provisioning or may have failed to become active.
+```bash
+# Snapshot (last 50 console events, default project endpoint + agent.yaml name)
+foundry agent monitor
 
-2. **List sessions** — Hosted-agent logs require a `sessionId`. If the user does not have one, list available sessions:
-   ```bash
-   az rest --method GET \
-     --url "<projectEndpoint>/agents/<agentName>/sessions?api-version=2025-11-15-preview" \
-     --headers "Foundry-Features=HostedAgents=V1Preview" \
-     --resource "https://ai.azure.com"
-   ```
+# Follow until Ctrl+C, override the persisted default project endpoint
+foundry agent monitor my-agent --follow \
+  --project-endpoint https://acct.services.ai.azure.com/api/projects/proj
 
-3. **Retrieve session logs** — The log stream endpoint uses Server-Sent Events (SSE). Use `curl` with a timeout:
-   ```bash
-   TOKEN=$(az account get-access-token --resource "https://ai.azure.com" --query accessToken -o tsv)
-   curl -s --max-time 15 \
-     -H "Authorization: Bearer $TOKEN" \
-     -H "Accept: text/event-stream" \
-     -H "Foundry-Features: HostedAgents=V1Preview" \
-     "<projectEndpoint>/agents/<agentName>/sessions/<sessionId>:logstream?api-version=2025-11-15-preview"
-   ```
+# System log channel, last 200 entries, UTC timestamps
+foundry agent monitor my-agent --type system --tail 200 --utc
 
-   > ⚠️ **404 is expected** if the session sandbox has not been created yet. Advise the user to send a message to the agent first to trigger sandbox creation, then retry.
+# Specific session, raw SSE for piping into jq/grep
+foundry agent monitor --session-id <session-id> --raw
 
-4. **Interpret the logs** — Each SSE frame is `event: log\ndata: {...}\n\n`:
-   - **Preamble** (first event): JSON with `session_state`, `session_id`, `agent`, `version`, `last_accessed`
-   - **Log lines** (subsequent events): JSON with `stream` (`stdout`/`stderr`/`status`), `message`, and `timestamp`
-   - **Error events**: `event: error` frames indicate server-side errors within the session sandbox
+# One-off run against a deployed agent URL (no project endpoint required)
+foundry agent monitor --agent-endpoint \
+  "https://acct.services.ai.azure.com/api/projects/proj/agents/my-agent/endpoint/protocols/invocations"
+```
 
-   Present the logs to the user and highlight any errors or warnings found.
+**Interpreting the output:**
 
-### Step 4: Discover Observability Connections
+- Default formatting: one line per event, e.g. `14:23:01  INFO  agent.run  request started (trace=0123…)`.
+- The console channel mixes stdout, stderr, and status messages from the container.
+- Error events / stack traces / failed dependency hints surface inline — highlight them to the user.
+
+If the CLI reports that no session is available, run a `foundry agent invoke "<probe>"` (see the [invoke skill](../invoke/invoke.md)) first to warm a session sandbox, then retry `foundry agent monitor`.
+
+### Step 4: Discover Observability Connections (Advanced — Beyond CLI Scope Today)
+
+The `foundry` CLI does not yet expose telemetry queries. The steps below remain `az` + Azure MCP-driven; only use them when the user explicitly wants to dig into Application Insights.
 
 List the project connections to find Application Insights or Azure Monitor resources using the Azure CLI command documented at:
 [az cognitiveservices account connection](https://learn.microsoft.com/en-us/cli/azure/cognitiveservices/account/connection?view=azure-cli-latest)
@@ -86,7 +90,7 @@ Refer to the documentation above for the exact command syntax and parameters. Lo
 
 If no observability connection is found, inform the user and suggest setting up Application Insights for the project. Ask if they want to proceed without telemetry data.
 
-### Step 5: Query Application Insights Telemetry
+### Step 5: Query Application Insights Telemetry (Advanced — Beyond CLI Scope Today)
 
 Use **`monitor_resource_log_query`** (Azure MCP tool) to run KQL queries against the Application Insights resource discovered in Step 4. This is preferred over delegating to the `azure-kusto` skill. Pass the App Insights resource ID and the KQL query directly.
 
@@ -106,14 +110,14 @@ Present a summary to the user including:
 
 | Error | Cause | Resolution |
 |-------|-------|------------|
-| Agent not found | Invalid agent name or project endpoint | Use `agent_get` to list available agents and verify name |
-| Hosted agent not active | Hosted agent is still provisioning or failed | Check that the ACR image was pushed correctly and agent identity permissions are assigned; wait and re-check status |
-| Session logs 404 | Session sandbox has not been created yet | The sandbox is created on first invocation — send a message to the agent to trigger sandbox creation, then retry |
-| SSE error event | Server-side error within the session sandbox | Check the error event `data` field for details |
-| No session ID | User does not know which session to troubleshoot | List sessions via REST API (see Step 3) |
-| No observability connection | Application Insights not configured for the project | Suggest configuring Application Insights for the Foundry project |
-| Kusto query failed | Invalid cluster/database or insufficient permissions | Verify Application Insights resource details and reader permissions |
-| No telemetry data | Agent not instrumented or too recent | Check if Application Insights SDK is configured; data may take a few minutes to appear |
+| `agent '<name>' not found` | Invalid agent name or project endpoint | Verify the name with the user; pass `--project-endpoint <url>` to retarget. |
+| Hosted agent not active | Hosted agent is still provisioning or failed | Check ACR image push succeeded and agent identity permissions are assigned; wait and re-check by running `foundry agent monitor` again. |
+| `foundry agent monitor` reports "no session available" | No session has been invoked yet (sandbox not created) | Run `foundry agent invoke "<probe>"` first to warm a sandbox, then retry monitor. |
+| `foundry agent monitor` errors for a prompt agent | Prompt agents do not have session logs | Skip to Step 4 (advanced telemetry) or rely on the model deployment's metrics. |
+| SSE / `--raw` shows server-side error events | Container error inside the session sandbox | Inspect the message body; fix the agent code and redeploy. |
+| Auth failure (`DefaultAzureCredential`) | Not signed in | Run `az login` and retry. |
+| Kusto query failed (Step 5) | Invalid cluster/database or insufficient permissions | Verify Application Insights resource details and reader permissions. |
+| No telemetry data (Step 5) | Agent not instrumented or too recent | Check if Application Insights SDK is configured; data may take a few minutes to appear. |
 
 ## Additional Resources
 
