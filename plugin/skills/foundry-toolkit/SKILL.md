@@ -1,9 +1,9 @@
 ---
 name: foundry-toolkit
-description: Run the local Foundry agent server plus the inspector UI as background tasks so their output can be watched and analyzed live. Use when the user asks to start the agent, run azd ai agent run, run the inspector, or wants the agent to watch / analyze the agent's output.
+description: Run the local Foundry agent server plus the inspector UI as background tasks so their output can be watched and analyzed live. Use when the user asks to start the agent, run the agent, run the inspector, or wants the agent to watch / analyze the agent's output.
 ---
 
-# Run azd Agent + Inspector (background tasks + monitor sub-agent)
+# Run Local Agent + Inspector (background tasks + monitor sub-agent)
 
 You launch the user's local agent server, open an inspector UI in their browser so they can interact with it, and watch the agent's output in the background. When the agent crashes or errors, you proactively help fix it. When the user asks about the agent's behavior, you read its captured output to answer from evidence.
 
@@ -129,24 +129,29 @@ Run this before Step 1 every time, even if you "just" started the agent.
 
 **Why (Windows-specific):** the agent runs on `hypercorn`, which on Windows lets a *second* process bind a port that's already listening without erroring. The new bind looks healthy but inbound traffic still flows to the old process — so the new code is silently ignored. Kill any stale listener on `8088` (and `8087`) **before** launching.
 
-For each of `8088` and `8087`:
+Keep a **session-scoped PID memory** of the agent-server and inspector-ui processes you launch in this session. The rule for each of `8088` and `8087`:
 
 1. Find the process listening on the port.
-2. Decide whether it's "ours" — does it descend from an `azd ai agent run|invoke` command? Walk the parent process tree. Don't fingerprint by binary name; the actual holder may be `python.exe` or anything else.
-3. If yes (azd ancestry): `Stop-Process -Id <PID> -Force`, wait a moment, move on.
-4. If no: it's the user's own process. Don't silently kill it — `ask_user` with name, PID, and port (e.g. *"Port 8088 is held by PID 12345 (`node.exe`), which isn't from azd. OK to kill it?"*). Abort if they decline.
+2. If its PID is one you launched earlier in this session (recorded under the matching `agent-server` / `inspector-ui` shellId): `Stop-Process -Id <PID> -Force`, wait a moment, move on.
+3. Otherwise it's the user's own process. Don't silently kill it — `ask_user` with name, PID, and port (e.g. *"Port 8088 is held by PID 12345 (`node.exe`), which I didn't launch. OK to kill it?"*). Abort if they decline.
 
 If a previous async shell session for the agent/inspector is still running (`list_powershell`), `stop_powershell` it before proceeding.
 
 ## Step 1 — Start the agent server
 
+There is no `foundry agent run` verb today — the local agent server is started the same way the user would run it by hand. Read the agent root's `README.md` to find the documented start command (the scaffold usually prints one — typical patterns: `python main.py`, `dotnet run`, `npm start`). If the README spells out a multi-step setup (`python -m venv .venv; .venv\Scripts\activate; pip install -r requirements.txt; python main.py`), bundle it into one shell pipeline.
+
+Record the resolved start command in session memory so subsequent launches in the same session don't re-read the README.
+
 `powershell` with `mode: "async"`, `detach: true`, `shellId: "agent-server"`:
 
 ```powershell
-azd ai agent run 2>&1 | Tee-Object -FilePath "$env:TEMP\foundry-agent-server.log" -Append
+<README-documented start command> 2>&1 | Tee-Object -FilePath "$env:TEMP\foundry-agent-server.log" -Append
 ```
 
-The `Tee-Object` sends output to both the shell session (readable via `read_powershell`) and a log file (readable by the monitor sub-agent).
+The `Tee-Object` sends output to both the shell session (readable via `read_powershell`) and a log file (readable by the monitor sub-agent). After launch, record the new PID under the `agent-server` shellId in session memory (used by Step 0 on the next relaunch).
+
+> 💡 For Python projects, prefer the project's `.venv` interpreter when present (`.venv\Scripts\python.exe main.py` on Windows). The agent server does **not** hot-reload, so any code edit needs the restart protocol below.
 
 ## Step 2 — Wait for the agent to be listening
 
@@ -173,10 +178,10 @@ If this throws, **don't** start the inspector. `read_powershell` on `agent-serve
 `powershell` with `mode: "async"`, `detach: true`, `shellId: "inspector-ui"`:
 
 ```powershell
-azd ai agent invoke --local --inspector 2>&1 | Tee-Object -FilePath "$env:TEMP\foundry-inspector.log" -Append
+foundry agent invoke --local --inspect 2>&1 | Tee-Object -FilePath "$env:TEMP\foundry-inspector.log" -Append
 ```
 
-The inspector serves on `http://localhost:8087/` and auto-opens the browser.
+The inspector serves on `http://localhost:8087/` and auto-opens the browser. After launch, record the new PID under the `inspector-ui` shellId in session memory.
 
 ## Step 4 — Spawn the Monitor
 
@@ -273,7 +278,7 @@ Tell the user what was stopped, in one or two sentences. Logs are cleaned automa
 
 ## Notes
 
-- Default ports: agent `8088`, inspector `8087`. Customize with `--port` / `--inspector-port` if a non-azd process the user wants to keep is holding either.
+- Default ports: agent `8088`, inspector `8087`. Customize with the agent entrypoint's own `--port` flag (or env var, per its README) and `foundry agent invoke --local --inspect --inspector-port <int>` if another process the user wants to keep is holding either.
 - **Never** drive the inspector UI with browser automation (Playwright MCP, `browser_navigate`, etc.). The browser UI is for the **user**. You only consume captured output.
 - Log files at `$env:TEMP\foundry-agent-server.log` / `$env:TEMP\foundry-inspector.log` are implementation details. Never surface these paths.
 - The monitor sub-agent is launched via `task` with `agent_type: "task"`, `mode: "background"`. It's stateless — all context must be in its prompt.
