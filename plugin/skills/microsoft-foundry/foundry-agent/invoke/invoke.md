@@ -101,8 +101,10 @@ See [Invocations Protocol Guide](references/invocations-protocol.md) for full de
 
 The CLI persists per-agent session and conversation IDs automatically; consecutive invokes against the same agent continue the same thread.
 
-- **Responses protocol** — conversation reused automatically. Use `--new-conversation` to start fresh or `--conversation-id <id>` to pin one.
-- **Invocations protocol** — session reused automatically. Use `--new-session` to start fresh or `--session-id <id>` to pin one. Conversation IDs are not meaningful for `invocations`.
+- **Responses protocol** — both `session_id` and `conversation_id` are reused automatically. Use `--new-conversation` to start a fresh chat history within the same runtime; use `--new-session` to discard the runtime instance as well.
+- **Invocations protocol** — `session_id` is reused automatically (conversations are not used). Use `--new-session` to start fresh or `--session-id <id>` to pin one. `--new-conversation` is a no-op here.
+
+> ⚠️ **After a redeploy, you MUST pass `--new-session` to talk to the new version.** A cached `session_id` pins the runtime to the **agent version it was created against**, so a plain `foundry agent invoke` after a deploy keeps hitting the OLD version (the CLI prints a `cached session pinned to version N` warning on stderr). `--new-conversation` alone only resets chat history — it does **not** move you to the new version. Use `--new-session --new-conversation` for a clean post-deploy invoke.
 
 ### Step 5: File Operations (Hosted Agents)
 

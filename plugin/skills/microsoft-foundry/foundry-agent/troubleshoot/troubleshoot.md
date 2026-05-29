@@ -111,6 +111,7 @@ Present a summary to the user including:
 | Error | Cause | Resolution |
 |-------|-------|------------|
 | `agent '<name>' not found` | Invalid agent name or project endpoint | Verify the name with the user; pass `--project-endpoint <url>` to retarget. |
+| `cached session pinned to version N` warning, but agent behavior matches an older version | Cached `session_id` pins the runtime to the version it was created against — a plain `foundry agent invoke` after a redeploy keeps hitting the old version | Re-run with `foundry agent invoke <name> "..." --new-session --new-conversation` to move onto the latest deployed version. `--new-conversation` alone is **not** enough. |
 | Hosted agent not active | Hosted agent is still provisioning or failed | Check ACR image push succeeded and agent identity permissions are assigned; wait and re-check by running `foundry agent monitor` again. |
 | `foundry agent monitor` reports "no session available" | No session has been invoked yet (sandbox not created) | Run `foundry agent invoke "<probe>"` first to warm a sandbox, then retry monitor. |
 | `foundry agent monitor` errors for a prompt agent | Prompt agents do not have session logs | Skip to Step 4 (advanced telemetry) or rely on the model deployment's metrics. |

@@ -167,11 +167,13 @@ If the deploy succeeded but later steps (smoke test) report a permission error, 
 
 For a hosted agent, the version may still be provisioning even after `foundry agent deploy` returns; the smoke test is the first opportunity to detect provisioning failures.
 
-Read and follow the [invoke skill](../invoke/invoke.md) to send a short probe relevant to the agent's purpose (ask the user for a probe message if unclear). For a default-project, default-name deploy this is simply:
+Read and follow the [invoke skill](../invoke/invoke.md) to send a short probe relevant to the agent's purpose (ask the user for a probe message if unclear). For a default-project, default-name deploy this is:
 
 ```bash
-foundry agent invoke "<probe message>"
+foundry agent invoke "<probe message>" --new-session --new-conversation
 ```
+
+> ⚠️ **`--new-session` is mandatory after every deploy.** Each successful deploy creates a new agent version. A cached session pins the runtime to the version it was created against — so a plain `foundry agent invoke` after a redeploy keeps hitting the **OLD** version (the CLI prints a `cached session pinned to version N` warning on stderr). Always pass `--new-session --new-conversation` for the post-deploy smoke test so the probe actually exercises the version you just shipped.
 
 If the call fails with a "version not active" / `424 FailedDependency` / `session_not_ready` error, wait 15-30 seconds and retry up to a few times. If it continues to fail (including auth or permission errors), immediately read and follow the [troubleshoot skill](../troubleshoot/troubleshoot.md). Do not treat the deployment as fully successful until invocation succeeds.
 
