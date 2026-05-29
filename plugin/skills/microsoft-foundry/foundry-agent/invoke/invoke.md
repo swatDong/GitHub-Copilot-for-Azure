@@ -33,7 +33,7 @@ Invoke deployed agents in Azure AI Foundry, or smoke-test a locally-running host
 | `foundry agent invoke ... --new-session` / `--session-id <id>` | Reset or pin the session (any protocol). |
 | `foundry agent invoke ... --new-conversation` / `--conversation-id <id>` | Reset or pin the conversation (`responses` only). |
 
-> **Project endpoint** — pass `--project-endpoint <url>` to override; otherwise the CLI uses the default set via `foundry agent project set <url>` (inspect with `foundry agent project show`). If neither is available, ask the user.
+> **Project endpoint** — pass `--project-endpoint <url>` to override; otherwise the CLI uses the default set via `foundry project set <url>` (inspect with `foundry project show`). If neither is available, ask the user.
 >
 > **Agent name** — pass as positional argument; otherwise the CLI reads `agent.yaml` in the current directory.
 
@@ -90,7 +90,7 @@ Remote invocations stream by default when the server supports SSE (`responses` a
 
 1. Fetch the OpenAPI spec (if the developer registered one):
    ```bash
-   curl "$(foundry agent project show)/agents/<agentName>/endpoint/protocols/invocations/docs/openapi.json"
+   curl "$(foundry project show)/agents/<agentName>/endpoint/protocols/invocations/docs/openapi.json"
    ```
 2. Inspect the agent's route-handler code or `README.md` for the expected payload shape.
 3. If still unknown, ask the user for the agent's API contract before invoking.

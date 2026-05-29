@@ -39,7 +39,7 @@ Troubleshoot and debug Foundry agents by streaming hosted-agent session logs thr
 ### Step 1: Collect Agent Information
 
 Identify the agent and project endpoint:
-- **Project endpoint** — pass `--project-endpoint <url>` to override; otherwise the CLI uses the default set via `foundry agent project set <url>` (inspect with `foundry agent project show`). If neither is available, ask the user.
+- **Project endpoint** — pass `--project-endpoint <url>` to override; otherwise the CLI uses the default set via `foundry project set <url>` (inspect with `foundry project show`). If neither is available, ask the user.
 - **Agent name** — pass as positional argument; otherwise the CLI reads `agent.yaml` in the current directory.
 
 ### Step 2: Determine Agent Type (Best-Effort)

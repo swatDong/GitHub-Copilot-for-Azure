@@ -24,7 +24,7 @@ Create new hosted agent applications for Microsoft Foundry, or convert existing 
 
 > Relative reference paths in this file are resolved from the directory containing `create.md`. For example, `./references/agentframework.md` means the file next to this document under `create/references/`, not a path relative to the runtime working directory.
 
-> **Project endpoint (optional at create time)** — the `foundry` CLI accepts a project endpoint via `--project-endpoint <url>`; otherwise it uses the default set with `foundry agent project set <url>` (inspect via `foundry agent project show`). It is fine to scaffold without one and bind it later.
+> **Project endpoint (optional at create time)** — the `foundry` CLI accepts a project endpoint via `--project-endpoint <url>`; otherwise it uses the default set with `foundry project set <url>` (inspect via `foundry project show`). It is fine to scaffold without one and bind it later.
 
 ### Step 1: Determine Scenario
 
@@ -51,9 +51,11 @@ Use the `foundry agent init` command. It owns sample browsing, download, and sca
 
 - If the user has no preferences, default to **Python + `responses` + Microsoft Agent Framework** and pick the simplest sample that matches what the user asked the agent to do (e.g. `tools` for local function tools, `mcp` for MCP integration, `foundry-toolbox` for server-side tools, `hello-world`/`basic`/`simple` for a minimal start).
 
-- If the user wants to browse, run `foundry agent init --interactive` (single-select menus filtered by prior choices) **or** read the canonical template index from `foundry agent init --help` and surface the options to them. Do **not** invent or duplicate sample listings.
+- If the user wants to browse, run `foundry agent init --interactive` (single-select menus filtered by prior choices) **or** run `foundry agent init --list-templates` to print the canonical sample catalog and surface the options to them. Do **not** invent or duplicate sample listings.
 
 - Optionally bind project + model deployment into the scaffold's `.env` at creation time: `--project-endpoint <url>` and `--model-deployment <name>`.
+
+> ⚠️ **Automation guardrail (Copilot CLI / non-interactive shells):** `foundry agent init` **auto-launches an interactive picker** when no selection flag is supplied and stdin/stdout are a TTY. To prevent hangs in agentic runs, either supply enough flags (`--template-id` or `--language` + `--framework` + `--protocol` + `--sample`) **or** pass `--no-prompt` (also via `FOUNDRY_NO_PROMPT=1`, `CI=1`, `TERM=dumb`, `DEBIAN_FRONTEND=noninteractive`) so missing inputs fail fast instead of prompting.
 
 > ⚠️ **Warning:** LangGraph is Python-only. For C# + LangGraph, suggest Microsoft Agent Framework or `bring-your-own` (Custom) instead.
 

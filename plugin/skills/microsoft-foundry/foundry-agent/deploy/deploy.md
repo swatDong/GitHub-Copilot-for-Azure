@@ -63,7 +63,7 @@ For direct-code deployments, Step 3 runs the direct-code reference and deploys t
 
 ### Prerequisites
 
-- A default Foundry project endpoint set with `foundry agent project set <url>` (inspect with `foundry agent project show`), **or** the user will pass `--project-endpoint <url>` on the deploy invocation.
+- A default Foundry project endpoint set with `foundry project set <url>` (inspect with `foundry project show`), **or** the user will pass `--project-endpoint <url>` on the deploy invocation.
 - An Azure CLI login (`az login`) or other `DefaultAzureCredential`-compatible auth in the shell where `foundry agent deploy` runs.
 
 ### Step 1: Detect and Scan Project
@@ -115,6 +115,8 @@ foundry agent deploy --method zip
 ```
 
 For all other hosted-agent deployments, run `foundry agent deploy` from the agent source folder. Method auto-detection: `--image` (or `agent.yaml#image`) → `image`; a `Dockerfile` next to `agent.yaml` → `container`; otherwise → `zip`.
+
+> ⚠️ **Automation guardrail (Copilot CLI / non-interactive shells):** `foundry agent deploy` **auto-launches an interactive picker** when there is no `agent.yaml`/`--name`/`--image` at the deploy path and stdin/stdout are a TTY. To prevent hangs in agentic runs, either supply enough flags (an `agent.yaml` in the deploy folder, `--name`, `--image`, etc.) **or** pass `--no-prompt` (also via `FOUNDRY_NO_PROMPT=1`, `CI=1`, `TERM=dumb`, `DEBIAN_FRONTEND=noninteractive`) so missing inputs fail fast with an actionable error instead of prompting.
 
 ```bash
 # Default — auto-detect method, use persisted default project endpoint, auto-provision ACR in the project RG if needed
@@ -424,7 +426,7 @@ Use `agent_get` without `agentName` to list all agents, or with `agentName` to g
 
 | Error | Cause | Resolution |
 |-------|-------|------------|
-| `--project-endpoint is required` | No default set and no flag passed | Run `foundry agent project set <url>` once, or pass `--project-endpoint <url>`. |
+| `--project-endpoint is required` | No default set and no flag passed | Run `foundry project set <url>` once, or pass `--project-endpoint <url>`. |
 | `agent name is required` | `agent.yaml` lacks `name` and no `--name` flag | Set `name:` in `agent.yaml` or pass `--name <name>`. |
 | `cpu X requires memory Y` | Invalid CPU/memory pair | Valid pairs: `0.5/1`, `1/2`, `2/4`. |
 | `agent '<name>' already exists` | Ran with `--no-update-if-exists` | Rerun without that flag to push a new version. |
@@ -450,14 +452,14 @@ Use these when the `foundry` CLI is missing a capability:
 
 ## Non-Interactive / YOLO Mode
 
-When running in non-interactive mode (e.g., `nonInteractive: true` or YOLO mode), the skill skips user confirmation prompts and relies on values that are already resolvable:
+When running in non-interactive mode (e.g., `nonInteractive: true` or YOLO mode), the skill skips user confirmation prompts and relies on values that are already resolvable. **Critically:** `foundry agent deploy` itself can launch its own interactive picker (when there is no `agent.yaml`/`--name`/`--image` and stdin/stdout are a TTY). To opt the CLI out of that picker as well, pass `--no-prompt` or set one of `FOUNDRY_NO_PROMPT=1`, `CI=1`, `TERM=dumb`, `DEBIAN_FRONTEND=noninteractive` in the environment.
 
 - **Environment variables** — uses values from `--env`, `--env-file`, `.env`, and `agent.yaml` without prompting; deploy fails fast on any unresolved `${REF}` placeholder unless `--allow-unresolved-env` is set.
-- **Agent name** — must be set in `agent.yaml` or passed via `--name`; otherwise `foundry agent deploy` fails with a clear error.
+- **Agent name** — must be set in `agent.yaml` or passed via `--name`; otherwise `foundry agent deploy --no-prompt` fails with a clear error.
 - **Hosted-agent verification** — continues into RBAC handling (done by the CLI) and the Step 7 invocation smoke test without additional prompts once deploy succeeds.
 - **Direct code deployment** — if explicitly requested, Step 3 reads the direct-code reference and runs `foundry agent deploy --method zip`, then proceeds directly to Step 7.
 
-> ⚠️ **Warning:** In non-interactive mode, ensure all required values (project endpoint, agent name, model deployment, env vars, and ACR image for `--method image` deploys) are provided upfront via flags, `agent.yaml`, or `.env`. Missing values cause `foundry agent deploy` to fail rather than prompt.
+> ⚠️ **Warning:** In non-interactive mode, ensure all required values (project endpoint, agent name, model deployment, env vars, and ACR image for `--method image` deploys) are provided upfront via flags, `agent.yaml`, or `.env`. Missing values cause `foundry agent deploy --no-prompt` to fail rather than prompt.
 
 ## Additional Resources
 
