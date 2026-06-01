@@ -13,7 +13,9 @@ This skill helps developers work with Microsoft Foundry resources, covering mode
 
 ## Pre-Execution Requirements
 
-> **MANDATORY: Before executing ANY workflow, you MUST first call the Azure MCP `foundry` tool and inspect the available Foundry MCP tools and related parameters.** Treat this initial `foundry` call as a discovery/help step. For this skill, Azure MCP `foundry` is the required entry point for Foundry-related MCP operations.
+> **For agent workflows (create / deploy / invoke / troubleshoot / observe / trace / eval-datasets / agent-optimizer), prefer `azd` and the `azd ai agent` extension (v0.1.36-preview or later). It auto-resolves project context from `azure.yaml` + `azd env get-values` and replaces most Foundry MCP tool calls with first-class CLI verbs.** Each agent sub-skill leads with the azd verb and documents MCP/CLI fallbacks only for break-glass scenarios.
+>
+> **For non-agent workflows (infrastructure provisioning, RBAC, quota, fine-tuning, private network, model deployment), call the Azure MCP `foundry` tool first** to inspect available Foundry MCP tools and parameters. Treat that initial `foundry` call as a discovery/help step for those flows.
 
 ## Sub-Skills
 
@@ -61,20 +63,21 @@ Match user intent to the correct infrastructure workflow.
 
 ## Agent Development Lifecycle
 
-Match user intent to the correct agent workflow. Read each sub-skill in order before executing.
+Match user intent to the correct agent workflow. Read each sub-skill in order before executing. The right column lists the primary azd verb(s); each sub-skill includes MCP/CLI fallbacks.
 
-| User Intent | Workflow (read in order) |
-|-------------|------------------------|
-| Create a new agent from scratch | [create](foundry-agent/create/create-hosted.md) → [deploy](foundry-agent/deploy/deploy.md) → [invoke](foundry-agent/invoke/invoke.md) |
-| Optimize existing Python hosted agent | [agent-optimizer](foundry-agent/agent-optimizer/agent-optimizer.md) → scaffold/review → eval.yaml → optimize → apply candidate → deploy → invoke |
-| Deploy an agent (code already exists) | deploy (includes eval-suite setup) → invoke → observe (evaluate/optimize) |
-| Update/redeploy an agent after code changes | deploy (includes eval-suite setup) → invoke → observe (evaluate/optimize) |
-| Invoke/test/chat with an agent | invoke |
-| Optimize / improve agent prompt or instructions | observe (Step 4: Optimize) |
-| Evaluate and optimize agent (full loop) | observe |
-| Enable continuous evaluation monitoring | observe (Step 6: CI/CD & Monitoring) |
-| Troubleshoot an agent issue | invoke → troubleshoot |
-| Fix a broken agent (troubleshoot + redeploy) | invoke → troubleshoot → apply fixes → deploy → invoke |
+| User Intent | Workflow (read in order) | Primary azd verbs |
+|-------------|------------------------|-------------------|
+| Create a new agent from scratch | [create](foundry-agent/create/create-hosted.md) → [deploy](foundry-agent/deploy/deploy.md) → [invoke](foundry-agent/invoke/invoke.md) | `azd ai agent init` → `azd deploy` → `azd ai agent invoke` |
+| Run / test agent locally during development | [create](foundry-agent/create/create-hosted.md) (Step 4) | `azd ai agent run` + `azd ai agent invoke --local` (+ optional `azd ai inspector launch`) |
+| Optimize existing Python hosted agent | [agent-optimizer](foundry-agent/agent-optimizer/agent-optimizer.md) → scaffold/review → eval.yaml → optimize → apply candidate → deploy → invoke | `azd ai agent optimize` → `azd ai agent optimize apply --candidate <id>` → `azd deploy` |
+| Deploy an agent (code already exists) | [deploy](foundry-agent/deploy/deploy.md) (includes smoke test + eval-suite setup) → [observe](foundry-agent/observe/observe.md) | `azd deploy` → `azd ai agent invoke` → `azd ai agent eval init` |
+| Update/redeploy an agent after code changes | [deploy](foundry-agent/deploy/deploy.md) → [observe](foundry-agent/observe/observe.md) | `azd deploy` → `azd ai agent invoke` → `azd ai agent eval run` |
+| Invoke/test/chat with an agent | [invoke](foundry-agent/invoke/invoke.md) | `azd ai agent invoke` |
+| Optimize / improve agent prompt or instructions | [observe](foundry-agent/observe/observe.md) (Step 4: Optimize) | `azd ai agent optimize` |
+| Evaluate and optimize agent (full loop) | [observe](foundry-agent/observe/observe.md) | `azd ai agent eval init` → `azd ai agent eval run` → `azd ai agent optimize` |
+| Enable continuous evaluation monitoring | [observe](foundry-agent/observe/observe.md) (Step 6: CI/CD & Monitoring) | Foundry MCP (`continuous_eval_*`) — no azd verb yet |
+| Troubleshoot an agent issue | [invoke](foundry-agent/invoke/invoke.md) → [troubleshoot](foundry-agent/troubleshoot/troubleshoot.md) | `azd ai agent doctor` → `azd ai agent monitor --follow` |
+| Fix a broken agent (troubleshoot + redeploy) | [invoke](foundry-agent/invoke/invoke.md) → [troubleshoot](foundry-agent/troubleshoot/troubleshoot.md) → apply fixes → [deploy](foundry-agent/deploy/deploy.md) → [invoke](foundry-agent/invoke/invoke.md) | `azd ai agent doctor` → fix → `azd deploy` → `azd ai agent invoke` |
 
 ## Agent: .foundry Workspace Standard
 

@@ -1,17 +1,16 @@
 # Foundry Agent Troubleshoot
 
-Troubleshoot and debug Foundry agents by collecting hosted-agent session logs, discovering observability connections, and querying Application Insights telemetry.
+Diagnose hosted and prompt agent issues using `azd ai agent` commands, with fall-throughs to `az` CLI and Application Insights for telemetry.
 
 ## Quick Reference
 
 | Property | Value |
 |----------|-------|
 | Agent types | Prompt (LLM-based), Hosted |
-| MCP servers | `azure` |
-| Key Foundry MCP tools | `agent_get` |
-| Related skills | `trace` (telemetry analysis) |
-| Preferred query tool | `monitor_resource_log_query` (Azure MCP) — preferred over `azure-kusto` for App Insights |
-| CLI references | `az cognitiveservices account connection`, `az rest`, `curl` |
+| Primary tool | `azd ai agent` (Foundry extension v0.1.36-preview or later) |
+| Key verbs | `doctor`, `show`, `monitor`, `sessions` |
+| Fallback CLIs | `az monitor app-insights query`, `az cognitiveservices account connection list` |
+| Related skills | `trace` (deep telemetry analysis) |
 
 ## When to Use This Skill
 
@@ -19,101 +18,123 @@ Troubleshoot and debug Foundry agents by collecting hosted-agent session logs, d
 - Hosted agent version is not becoming active
 - Need to view hosted-agent session logs
 - Diagnose latency or timeout issues
-- Query Application Insights for agent traces and exceptions
-- Investigate agent runtime failures
-
-## MCP Tools
-
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `agent_get` | Get agent details to determine type and inspect agent/version status | `projectEndpoint` (required), `agentName` (optional) |
+- Investigate agent runtime failures or RBAC drift
 
 ## Workflow
 
-### Step 1: Collect Agent Information
+### Step 1: Resolve Project Context
 
-Use the project endpoint and agent name from the project context (see [Common Project Context Resolution](../../SKILL.md#agent-common-project-context-resolution)). Ask the user only for values not already resolved:
-- **Project endpoint** — AI Foundry project endpoint URL
-- **Agent name** — Name of the agent to troubleshoot
+Use the [Common Project Context Resolution](../../SKILL.md#agent-common-project-context-resolution) flow only for values not already known. The `azd ai agent *` commands auto-resolve agent name, version, and project endpoint from `azure.yaml` plus the active azd environment — pass `--agent-name` only when the project has multiple `azure.ai.agent` services.
 
-### Step 2: Determine Agent Type
+### Step 2: Run the Diagnostic Check Suite
 
-Use `agent_get` with `projectEndpoint` and `agentName` to retrieve the agent definition. Check the `kind` field:
-- `"hosted"` → Proceed to Step 3
-- `"prompt"` → Skip to Step 4 (Discover Observability Connections)
+Run `azd ai agent doctor` first. It executes a sequence of local and remote checks (azd env, agent.yaml, project endpoint, RBAC, deployed agent status) and prints a structured report.
 
-### Step 3: Retrieve Logs (Hosted Agents Only)
+```bash
+azd ai agent doctor              # full suite
+azd ai agent doctor --local-only # offline / fast triage
+azd ai agent doctor --unredacted # show raw principal IDs and scope ARNs
+```
 
-Hosted-agent logs are scoped to individual **sessions** (sandbox instances).
+Exit codes:
+- `0` — at least one check passed, none failed
+- `1` — any check failed (read the report and fix the first failure)
+- `2` — all checks were skipped (preconditions unmet)
 
-> ℹ️ **`invocations_ws` agents:** the `sessionId` used by these REST endpoints is the **client-supplied `agent_session_id`** that the WebSocket client put on the upgrade URL — not a value issued by `session_create`. If the user has the WS client logs, pull the `agent_session_id` from there and pass it as `sessionId` below. See the [invocations-ws skill](../invocations-ws/invocations-ws.md) for the WS URL contract.
+If `doctor` reports a missing RBAC role assignment, follow the [rbac skill](../../rbac/rbac.md) to grant it (typically `Foundry User` on the **Foundry project scope** for the per-agent managed identity; the Foundry project managed identity needs `AcrPull` on the ACR).
 
-1. **Check agent version status** — Use `agent_get` to verify the agent version status is `active`. If it is not active, the agent may still be provisioning or may have failed to become active.
+### Step 3: Inspect Agent Status
 
-2. **List sessions** — Hosted-agent logs require a `sessionId`. If the user does not have one, list available sessions:
+If `doctor` passed but the agent still misbehaves, use `azd ai agent show` to inspect deployment state:
+
+```bash
+azd ai agent show                 # default agent service
+azd ai agent show my-agent        # specific service
+azd ai agent show --output json   # machine-readable
+```
+
+Look for `kind` (hosted vs prompt) and, for hosted agents, the version status. A version that is not `active` is either still provisioning or failed; check `doctor` output for the root cause.
+
+### Step 4: Stream Hosted Agent Logs
+
+For hosted agents, stream container stdout/stderr or system events with `azd ai agent monitor`. The session ID auto-resolves from the last invocation; no manual SSE/curl/token plumbing is needed.
+
+```bash
+azd ai agent monitor                              # last 50 lines, last-used session
+azd ai agent monitor --follow                     # stream in real time
+azd ai agent monitor --session-id <id> --follow   # specific session
+azd ai agent monitor --type system                # container lifecycle events
+azd ai agent monitor --tail 300                   # bigger window (max 300)
+```
+
+> ℹ️ **No session yet?** A hosted-agent session sandbox is created on first invocation. If `monitor` reports no session, run `azd ai agent invoke "test"` once to create one, then retry.
+
+For agents configured with header-based isolation, pass `--user-isolation-key` and `--chat-isolation-key`.
+
+### Step 5: Inspect Sessions
+
+When a specific session is misbehaving:
+
+```bash
+azd ai agent sessions list                # all sessions for the agent
+azd ai agent sessions show <session-id>   # session metadata & status
+azd ai agent sessions delete <session-id> # release compute and force a clean restart on next invoke
+```
+
+### Step 6: Query Application Insights Telemetry
+
+`azd` does not yet expose a telemetry query verb. For deeper trace / exception / latency analysis:
+
+1. **Find the App Insights connection** linked to the project:
+
    ```bash
-   az rest --method GET \
-     --url "<projectEndpoint>/agents/<agentName>/sessions?api-version=2025-11-15-preview" \
-     --headers "Foundry-Features=HostedAgents=V1Preview" \
-     --resource "https://ai.azure.com"
+   az cognitiveservices account connection list \
+     --name <account> --resource-group <rg> --query "[?category=='AppInsights']"
    ```
 
-3. **Retrieve session logs** — The log stream endpoint uses Server-Sent Events (SSE). Use `curl` with a timeout:
+   (Reference: [az cognitiveservices account connection](https://learn.microsoft.com/en-us/cli/azure/cognitiveservices/account/connection?view=azure-cli-latest).)
+
+2. **Run a KQL query** against the App Insights resource:
+
    ```bash
-   TOKEN=$(az account get-access-token --resource "https://ai.azure.com" --query accessToken -o tsv)
-   curl -s --max-time 15 \
-     -H "Authorization: Bearer $TOKEN" \
-     -H "Accept: text/event-stream" \
-     -H "Foundry-Features: HostedAgents=V1Preview" \
-     "<projectEndpoint>/agents/<agentName>/sessions/<sessionId>:logstream?api-version=2025-11-15-preview"
+   az monitor app-insights query \
+     --app <appinsights-name> --resource-group <rg> \
+     --analytics-query "traces | where message contains '<agent-name>' | take 50"
    ```
 
-   > ⚠️ **404 is expected** if the session sandbox has not been created yet. Advise the user to send a message to the agent first to trigger sandbox creation, then retry.
+   Or hand off to the `azure-kusto` skill for ad-hoc query authoring.
 
-4. **Interpret the logs** — Each SSE frame is `event: log\ndata: {...}\n\n`:
-   - **Preamble** (first event): JSON with `session_state`, `session_id`, `agent`, `version`, `last_accessed`
-   - **Log lines** (subsequent events): JSON with `stream` (`stdout`/`stderr`/`status`), `message`, and `timestamp`
-   - **Error events**: `event: error` frames indicate server-side errors within the session sandbox
+> 💡 If `APPLICATIONINSIGHTS_CONNECTION_STRING` is set in `azd env get-values`, use that as the source of truth for the App Insights resource ID.
 
-   Present the logs to the user and highlight any errors or warnings found.
+### Step 7: Summarize Findings
 
-### Step 4: Discover Observability Connections
-
-List the project connections to find Application Insights or Azure Monitor resources using the Azure CLI command documented at:
-[az cognitiveservices account connection](https://learn.microsoft.com/en-us/cli/azure/cognitiveservices/account/connection?view=azure-cli-latest)
-
-Refer to the documentation above for the exact command syntax and parameters. Look for connections of type `ApplicationInsights` or `AzureMonitor` in the output.
-
-If no observability connection is found, inform the user and suggest setting up Application Insights for the project. Ask if they want to proceed without telemetry data.
-
-### Step 5: Query Application Insights Telemetry
-
-Use **`monitor_resource_log_query`** (Azure MCP tool) to run KQL queries against the Application Insights resource discovered in Step 4. This is preferred over delegating to the `azure-kusto` skill. Pass the App Insights resource ID and the KQL query directly.
-
-> ⚠️ **Always pass `subscription` explicitly** to Azure MCP tools like `monitor_resource_log_query` — they don't extract it from resource IDs.
-
-Use `* contains "<response_id>"` or `* contains "<agent_name>"` filters to narrow down results to the specific agent instance.
-
-### Step 6: Summarize Findings
-
-Present a summary to the user including:
-- **Agent type and status** — hosted or prompt; hosted agent version status when relevant
-- **Log errors** — key errors from hosted-agent session logs
-- **Telemetry insights** — exceptions, failed requests, latency trends
-- **Recommended actions** — specific steps to resolve identified issues
+Present a short summary covering:
+- **Agent type and status** — hosted/prompt; hosted version status when relevant
+- **Doctor findings** — first failed check (if any) and the recommended fix
+- **Log errors** — key errors from `azd ai agent monitor`
+- **Telemetry insights** — exceptions, failed requests, latency outliers
+- **Recommended actions** — specific next steps (redeploy, RBAC fix, code fix)
 
 ## Error Handling
 
-| Error | Cause | Resolution |
-|-------|-------|------------|
-| Agent not found | Invalid agent name or project endpoint | Use `agent_get` to list available agents and verify name |
-| Hosted agent not active | Hosted agent is still provisioning or failed | Check that the ACR image was pushed correctly and agent identity permissions are assigned; wait and re-check status |
-| Session logs 404 | Session sandbox has not been created yet | The sandbox is created on first invocation — send a message to the agent to trigger sandbox creation, then retry |
-| SSE error event | Server-side error within the session sandbox | Check the error event `data` field for details |
-| No session ID | User does not know which session to troubleshoot | List sessions via REST API (see Step 3) |
-| No observability connection | Application Insights not configured for the project | Suggest configuring Application Insights for the Foundry project |
-| Kusto query failed | Invalid cluster/database or insufficient permissions | Verify Application Insights resource details and reader permissions |
-| No telemetry data | Agent not instrumented or too recent | Check if Application Insights SDK is configured; data may take a few minutes to appear |
+| Symptom | Likely Cause | Resolution |
+|---------|--------------|------------|
+| `azd ai agent show` returns "agent not found" | Wrong service, wrong env, or agent never deployed | Switch env with `-e`, or run `azd deploy` |
+| Hosted agent version not active | Still provisioning, ACR image bad, or per-agent MI missing pull permissions | Run `azd ai agent doctor`; check ACR build logs |
+| `azd ai agent monitor` reports no session | Sandbox not yet created | Run `azd ai agent invoke "test"` once, then retry monitor |
+| Invocation 401/403 | Per-agent MI missing `Foundry User` on the Foundry project scope | Run `azd ai agent doctor` to confirm; grant via rbac skill |
+| Invocation 424 / `session_not_ready` | Session still warming up | Wait 15-30s and retry; check `monitor --follow` |
+| No App Insights connection found | Telemetry not configured | Add an App Insights connection via `azd ai connection create` or Foundry portal |
+| KQL query returns nothing | Agent not instrumented, or data still ingesting | Confirm SDK setup; ingestion can lag 1-5 minutes |
+
+## Fallbacks (when `azd ai agent` is unavailable)
+
+If the `azd ai agent` extension is not installed or a verb returns "unknown command," fall back to:
+
+- **Agent status / list** — `az rest --method GET --url "<projectEndpoint>/agents?api-version=2025-11-15-preview" --resource "https://ai.azure.com"`
+- **Session logs** — `curl -H "Authorization: Bearer $(az account get-access-token --resource https://ai.azure.com -o tsv --query accessToken)" --max-time 15 -H "Accept: text/event-stream" "<projectEndpoint>/agents/<name>/sessions/<id>:logstream?api-version=2025-11-15-preview"` (SSE; each frame is `event: log\ndata: {...}\n\n`).
+
+These match the legacy MCP-equivalent paths and remain valid for break-glass scenarios.
 
 ## Additional Resources
 
