@@ -5,12 +5,29 @@
 # so the agent does not have to run (and reason over) each azd command separately.
 #
 # Usage:
-#   ./verify-environment.sh
+#   ./verify-environment.sh [--set-az-cli-auth]
+#
+# Flags:
+#   --set-az-cli-auth   Run `azd config set auth.useAzCliAuth true` so azd reuses
+#                       the Azure CLI (`az`) credentials and the user does not
+#                       need to sign in twice. Writes to user-global azd config
+#                       (~/.azure/config.json).
 #
 # Output: human-readable summary lines, each prefixed with [OK], [WARN], or [ACTION].
 # Exit code: 0 if no blocking actions, 1 if at least one [ACTION] is required.
 
 set -uo pipefail
+
+SET_AZ_CLI_AUTH=0
+for arg in "$@"; do
+  case "$arg" in
+    --set-az-cli-auth) SET_AZ_CLI_AUTH=1 ;;
+    -h|--help)
+      sed -n '2,20p' "$0"
+      exit 0
+      ;;
+  esac
+done
 
 ACTION_REQUIRED=0
 
@@ -47,10 +64,42 @@ for ext in azure.ai.agents azure.ai.projects; do
 done
 
 # 3. Auth status
+# Optionally apply auth.useAzCliAuth first so the rest of the run reflects the flipped state.
+if [ "$SET_AZ_CLI_AUTH" -eq 1 ]; then
+  if azd config set auth.useAzCliAuth true >/dev/null 2>&1; then
+    note_ok "Set auth.useAzCliAuth=true (azd will now reuse az CLI credentials)."
+  else
+    note_warn "Failed to set auth.useAzCliAuth=true. Continuing with current setting."
+  fi
+fi
+
+# Detect current azd auth mode (silently — returns non-zero if unset).
+USE_AZ_CLI_AUTH_RAW="$(azd config get auth.useAzCliAuth 2>/dev/null || true)"
+case "$USE_AZ_CLI_AUTH_RAW" in
+  true|True|TRUE) USE_AZ_CLI_AUTH=1 ;;
+  *)              USE_AZ_CLI_AUTH=0 ;;
+esac
+
 if azd auth login --check-status >/dev/null 2>&1; then
-  note_ok "Logged in to azd."
+  if [ "$USE_AZ_CLI_AUTH" -eq 1 ]; then
+    note_ok "Logged in to azd (using az CLI credentials, auth.useAzCliAuth=true)."
+  else
+    note_ok "Logged in to azd."
+  fi
 else
-  note_action "Not logged in. Ask the user to run 'azd auth login' (it opens a browser; never run it for them)."
+  # azd not authenticated -- see if `az` is, and suggest the cheapest fix.
+  if az account show >/dev/null 2>&1; then
+    AZ_LOGGED_IN=1
+  else
+    AZ_LOGGED_IN=0
+  fi
+  if [ "$AZ_LOGGED_IN" -eq 1 ] && [ "$USE_AZ_CLI_AUTH" -eq 0 ]; then
+    note_action "azd is not authenticated, but 'az' is. To reuse your az login (no second browser sign-in), run: azd config set auth.useAzCliAuth true   -- or re-run this script with --set-az-cli-auth."
+  elif [ "$AZ_LOGGED_IN" -eq 1 ] && [ "$USE_AZ_CLI_AUTH" -eq 1 ]; then
+    note_action "auth.useAzCliAuth=true but az credentials are not usable by azd. Ask the user to run 'az login' to refresh."
+  else
+    note_action "Not logged in. Ask the user to run 'azd auth login' (or 'az login' if auth.useAzCliAuth=true). Never run it for them; it opens a browser."
+  fi
 fi
 
 # 4. Foundry project endpoint (optional at this stage)

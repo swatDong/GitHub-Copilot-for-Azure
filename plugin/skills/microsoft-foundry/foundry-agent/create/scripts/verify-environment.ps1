@@ -7,9 +7,19 @@
 
     Output lines are prefixed with [OK], [WARN], or [ACTION].
     Exit code is 0 when no blocking actions remain, 1 when at least one [ACTION] is required.
+.PARAMETER SetAzCliAuth
+    When passed, runs `azd config set auth.useAzCliAuth true` so azd reuses the
+    Azure CLI (`az`) credentials and the user does not need to sign in twice.
+    This writes to the user-global azd config (~/.azure/config.json).
 .EXAMPLE
     ./verify-environment.ps1
+.EXAMPLE
+    ./verify-environment.ps1 -SetAzCliAuth
 #>
+
+param(
+    [switch]$SetAzCliAuth
+)
 
 $ErrorActionPreference = "Stop"
 $actionRequired = $false
@@ -73,11 +83,38 @@ foreach ($ext in @("azure.ai.agents", "azure.ai.projects")) {
 }
 
 # 3. Auth status
+# Optionally apply auth.useAzCliAuth first so the rest of the run reflects the flipped state.
+if ($SetAzCliAuth) {
+    & azd config set auth.useAzCliAuth true *> $null
+    if ($LASTEXITCODE -eq 0) {
+        Note-Ok "Set auth.useAzCliAuth=true (azd will now reuse az CLI credentials)."
+    } else {
+        Note-Warn "Failed to set auth.useAzCliAuth=true (exit $LASTEXITCODE). Continuing with current setting."
+    }
+}
+
+# Detect current azd auth mode (silently — returns non-zero if unset).
+$useAzCliAuthRaw = & azd config get auth.useAzCliAuth 2>$null
+$useAzCliAuth = ($LASTEXITCODE -eq 0) -and ($useAzCliAuthRaw -match '^(?i:true)$')
+
 & azd auth login --check-status *> $null
 if ($LASTEXITCODE -eq 0) {
-    Note-Ok "Logged in to azd."
+    if ($useAzCliAuth) {
+        Note-Ok "Logged in to azd (using az CLI credentials, auth.useAzCliAuth=true)."
+    } else {
+        Note-Ok "Logged in to azd."
+    }
 } else {
-    Note-Action "Not logged in. Ask the user to run 'azd auth login' (it opens a browser; never run it for them)."
+    # azd not authenticated -- see if `az` is, and suggest the cheapest fix.
+    & az account show *> $null
+    $azLoggedIn = ($LASTEXITCODE -eq 0)
+    if ($azLoggedIn -and -not $useAzCliAuth) {
+        Note-Action "azd is not authenticated, but 'az' is. To reuse your az login (no second browser sign-in), run: azd config set auth.useAzCliAuth true   -- or re-run this script with -SetAzCliAuth."
+    } elseif ($azLoggedIn -and $useAzCliAuth) {
+        Note-Action "auth.useAzCliAuth=true but az credentials are not usable by azd. Ask the user to run 'az login' to refresh."
+    } else {
+        Note-Action "Not logged in. Ask the user to run 'azd auth login' (or 'az login' if auth.useAzCliAuth=true). Never run it for them; it opens a browser."
+    }
 }
 
 # 4. Foundry project endpoint (optional at this stage)
