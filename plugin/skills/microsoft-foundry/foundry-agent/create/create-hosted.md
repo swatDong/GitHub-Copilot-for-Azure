@@ -131,20 +131,17 @@ See [deploy.md](../deploy/deploy.md) for the fully `azd`-free REST direct-code p
 
 ### Step 5 -- Run locally and iterate
 
-> **Run local BEFORE provision/deploy.** Local run does NOT require `azd provision` or any deployed infrastructure. The agent runs on your machine and calls the Foundry model endpoint directly using your local credentials (`DefaultAzureCredential`). This lets you validate agent behavior before spending time on infrastructure provisioning.
+> **Iterate locally before deploying.** Once the project is provisioned, `azd ai agent run` calls the Foundry model endpoint with your local credentials (`DefaultAzureCredential`), so you can change agent code freely without pushing a new agent version each time.
 >
-> You need only two values (from an existing project, a teammate, or the portal):
-> 1. A Foundry project endpoint.
-> 2. A model deployment name.
->
-> Create a `.env` file in the agent source directory:
+> You need two values in a `.env` file in the agent source directory:
 > ```env
 > FOUNDRY_PROJECT_ENDPOINT=https://<account>.services.ai.azure.com/api/projects/<project>
 > AZURE_AI_MODEL_DEPLOYMENT_NAME=<model-deployment-name>
 > ```
-> If you already ran `azd provision`, these values are in `azd env get-values`.
 >
-> **If no project endpoint is available yet**, provision first (Step 7 / [deploy.md](../deploy/deploy.md)), then return here for local iteration before deploying the agent.
+> Pick the path that matches the scenario:
+> - **Existing project (endpoint + model from teammate, prior env, or portal)** -> create `.env` with those values, run locally, deploy later.
+> - **New project, just scaffolded** -> run `azd provision` (Step 7 / [deploy.md](../deploy/deploy.md)) first to create the project + model (typically ~1 min with code deploy); then `azd env get-values` exposes the values for `.env`, and you iterate locally before `azd deploy`.
 
 ```bash
 azd ai agent run                          # localhost:8088 + opens Agent Inspector
